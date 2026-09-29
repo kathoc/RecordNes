@@ -13,6 +13,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { VideoJob } from "../shared/video-encoder.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -159,68 +160,30 @@ ipcMain.handle("video:start", async (_e, opts) => {
     filters: [{ name: "MP4 動画", extensions: ["mp4"] }],
   });
   if (r.canceled || !r.filePath) throw new Error("書き出しを取りやめました");
-
-  const args = [
-    "-y",
-    "-f", "rawvideo", "-pix_fmt", "rgba",
-    "-s", `${opts.width}x${opts.height}`,
-    "-r", String(opts.fps),
-    "-i", "pipe:3",
-  ];
-  if (opts.audio) {
-    args.push("-f", "s16le", "-ar", String(opts.sampleRate), "-ac", "1", "-i", "pipe:4");
-  }
-  args.push(
-    "-c:v", "libx264", "-preset", "medium", "-crf", String(opts.crf),
-    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-  );
-  if (opts.audio) args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
-  args.push("-shortest", r.filePath);
-
-  const child = spawn(ffmpegPath(), args, {
-    stdio: ["ignore", "pipe", "pipe", "pipe", opts.audio ? "pipe" : "ignore"],
-  });
-  let stderr = "";
-  child.stderr.on("data", (d) => { stderr += d; if (stderr.length > 40000) stderr = stderr.slice(-20000); });
-
   const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const job = { child, path: r.filePath, stderr: () => stderr, failed: null };
-  child.on("error", (err) => { job.failed = err; });
-  jobs.set(id, job);
+  jobs.set(id, new VideoJob(ffmpegPath(), opts, r.filePath));
   return { id };
 });
-
-function writePipe(stream, buf) {
-  return new Promise((resolve, reject) => {
-    if (!stream || stream.destroyed) return reject(new Error("ffmpeg への書き込み先が閉じています"));
-    if (stream.write(buf)) return resolve();
-    stream.once("drain", resolve);
-    stream.once("error", reject);
-  });
-}
 
 ipcMain.handle("video:write", async (_e, id, video, audio) => {
   const job = jobs.get(id);
   if (!job) throw new Error("書き出しの作業が見つかりません");
-  if (job.failed) throw job.failed;
-  await writePipe(job.child.stdio[3], Buffer.from(video));
-  if (audio && job.child.stdio[4]) await writePipe(job.child.stdio[4], Buffer.from(audio));
+  await job.write(Buffer.from(video), audio ? Buffer.from(audio) : null);
 });
 
 ipcMain.handle("video:finish", async (_e, id) => {
   const job = jobs.get(id);
   if (!job) throw new Error("書き出しの作業が見つかりません");
-  job.child.stdio[3]?.end();
-  job.child.stdio[4]?.end();
-  const code = await new Promise((resolve) => job.child.on("close", resolve));
-  jobs.delete(id);
-  if (code !== 0) throw new Error(`ffmpeg が異常終了しました (コード ${code})\n${job.stderr().slice(-1500)}`);
-  return job.path;
+  try {
+    return await job.finish();
+  } finally {
+    jobs.delete(id);
+  }
 });
 
 ipcMain.handle("video:cancel", async (_e, id) => {
   const job = jobs.get(id);
   if (!job) return;
-  job.child.kill("SIGKILL");
+  await job.cancel();
   jobs.delete(id);
 });

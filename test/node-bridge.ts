@@ -1,0 +1,51 @@
+/** テスト用のプラットフォーム実装。書き出しの中身は製品と同じ shared/ を使う。 */
+import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import type { PlatformBridge, VideoJob as VideoJobType, VideoOptions, PickedFile } from "../src/platform/types.ts";
+// @ts-expect-error 素の JS を Electron と共有している
+import { VideoJob } from "../shared/video-encoder.mjs";
+
+const require = createRequire(import.meta.url);
+
+export function ffmpegBinary(): string {
+  try {
+    const p = require("ffmpeg-static");
+    if (typeof p === "string") return p;
+  } catch { /* PATH を試す */ }
+  return "ffmpeg";
+}
+
+export class NodeBridge implements PlatformBridge {
+  readonly name = "electron" as const;
+  readonly canExportVideo = true;
+  private outPath: string;
+  constructor(outPath: string) { this.outPath = outPath; }
+
+  async openFile(): Promise<PickedFile | null> { return null; }
+  async saveFile(): Promise<string | null> { return null; }
+  async loadSettings(): Promise<Record<string, unknown>> { return {}; }
+  async saveSettings(): Promise<void> {}
+  async videoBackend(): Promise<string | null> { return ffmpegBinary(); }
+
+  async startVideo(opts: VideoOptions): Promise<VideoJobType> {
+    const job = new VideoJob(ffmpegBinary(), opts, this.outPath);
+    return {
+      id: "test",
+      write: (video: Uint8Array, audio: Int16Array | null) =>
+        job.write(Buffer.from(video), audio ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength) : null),
+      finish: () => job.finish(),
+      cancel: () => job.cancel(),
+    };
+  }
+}
+
+export function ffprobe(path: string): Promise<Record<string, unknown>> {
+  // ffmpeg-static には ffprobe が付いてこないので、PATH のものを使う。
+  return new Promise((resolve, reject) => {
+    const p = spawn("ffprobe", ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path]);
+    let out = "";
+    p.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+    p.on("error", reject);
+    p.on("close", (c) => (c === 0 ? resolve(JSON.parse(out)) : reject(new Error(`ffprobe exit ${c}`))));
+  });
+}
