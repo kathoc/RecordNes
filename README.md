@@ -120,7 +120,7 @@ npm run electron   # デスクトップアプリとして起動
 npm test           # 自動テスト
 npm run selftest   # 実アプリを自動操作して確かめる
 npm run perftest   # 遅延と計算時間を測る
-tools/close-check.sh   # 未保存のまま閉じられないことを確かめる
+tools/close-check.sh   # 未保存のまま閉じられないことを確かめる（判定つき）
 tools/packaged-check.sh # 配布物そのもので確かめる
 npm run dist:linux # 配布物を作る
 ```

@@ -34,7 +34,10 @@ export class NodeBridge implements PlatformBridge {
       write: (video: Uint8Array | null, audio: Int16Array | null) =>
         job.write(
           video ? Buffer.from(video) : null,
-          audio ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength) : null,
+          // **必ず複製する。** 渡ってくるのは使い回しバッファのビューで、
+          // 書き込みが同期的に返ると、中身が読まれる前に次のフレームで
+          // 上書きされる。Electron 側の実装は slice() 済み。
+          audio ? Buffer.copyBytesFrom(audio) : null,
         ),
       finish: () => job.finish(),
       cancel: () => job.cancel(),

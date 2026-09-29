@@ -384,7 +384,16 @@ export class App {
     if (this.session.resetClearsRecording && this.settings.confirmDiscard && this.session.totalFrames > 60) {
       if (!confirm(`リセットすると、ここまでの記録 (${formatTime(this.session.totalFrames)}) が消えます。よろしいですか？\n\n設定で「リセットで記録を消さない」を有効にすると、リセットそのものを記録に残せます。`)) return;
     }
+    const cleared = this.session.resetClearsRecording;
     await this.session.reset();
+    if (cleared) {
+      // Recorder ごと作り直されるので、前の記録との比較は意味を持たない。
+      // 戻し忘れると、保存 → リセット → 同じ長さまで録り直し、で
+      // 「保存済み」に見えてしまう。
+      this.savedAtFrames = -1;
+      this.recordingRevision = -1;
+      this.marked = null;
+    }
     this.audio.clear();
     this.setPaused(false);
     this.toast(this.session.resetClearsRecording ? "リセットしました（記録は消えました）" : "リセットを記録しました");

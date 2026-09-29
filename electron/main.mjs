@@ -44,6 +44,8 @@ if (process.env.RECORDNES_UNCAP === "1" || readSettingsSync().uncapFrameRate) {
 let win = null;
 /** 閉じてよいと決まったあと。二重に尋ねない */
 let closing = false;
+/** 確認の最中。X を連打されてもダイアログを重ねない */
+let asking = false;
 
 /** 起動時に開くファイル。コマンドライン引数か、OS の「このアプリで開く」から来る。
  *  自動検証でも使う: `electron . path/to/game.nes` で ROM を読んだ状態から始まる。 */
@@ -56,6 +58,10 @@ function settingsPath() {
 }
 
 async function createWindow() {
+  // 旗を持ち越さない。macOS で閉じたあと activate から開き直したとき、
+  // 立てっぱなしだと未保存の確認が二度と出なくなる。
+  closing = false;
+  asking = false;
   win = new BrowserWindow({
     width: 1100,
     height: 900,
@@ -77,6 +83,7 @@ async function createWindow() {
   win.on("close", (e) => {
     if (closing) return;
     e.preventDefault();
+    if (asking) return;   // 連打されても重ねない
     void askBeforeClose();
   });
 
@@ -124,36 +131,53 @@ ipcMain.handle("shot", async (_e, name) => {
   return out;
 });
 
-async function askBeforeClose() {
-  let unsaved = false;
-  try {
-    unsaved = await win.webContents.executeJavaScript(
-      "Boolean(window.recordnesApp && window.recordnesApp.hasUnsavedWork && window.recordnesApp.hasUnsavedWork())",
-      true,
-    );
-  } catch { /* 画面が応答しないなら、止めずに閉じる */ }
+/** 画面へ問い合わせる。応答が無いまま待ち続けないよう時間を切る。 */
+function ask(code, ms = 3000) {
+  return Promise.race([
+    win.webContents.executeJavaScript(code, true),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
 
-  if (unsaved) {
-    console.log("[close] 未保存の記録があるので確認を出します");
-    const { response } = await dialog.showMessageBox(win, {
-      type: "warning",
-      buttons: ["保存して閉じる", "保存せずに閉じる", "やめる"],
-      defaultId: 0,
-      cancelId: 2,
-      message: "記録がまだ保存されていません",
-      detail: "閉じると、この記録は失われます。",
-    });
-    if (response === 2) return;
-    if (response === 0) {
-      const saved = await win.webContents
-        .executeJavaScript("window.recordnesApp.saveRecordingForClose()", true)
-        .catch(() => false);
-      if (!saved) return; // 保存を取りやめたなら閉じない
+async function askBeforeClose() {
+  asking = true;
+  try {
+    let unsaved = false;
+    let unknown = false;
+    try {
+      unsaved = await ask(
+        "Boolean(window.recordnesApp && window.recordnesApp.hasUnsavedWork && window.recordnesApp.hasUnsavedWork())",
+      );
+    } catch {
+      // 画面が長い再計算で詰まっていると、返事が来ない。
+      // 「分からないから閉じる」は記録を失う側に倒れるので、聞く方を選ぶ。
+      unknown = true;
     }
+
+    if (unsaved || unknown) {
+      console.log(`[close] ${unknown ? "画面の応答が無いので" : "未保存の記録があるので"}確認を出します`);
+      const { response } = await dialog.showMessageBox(win, {
+        type: "warning",
+        buttons: ["保存して閉じる", "保存せずに閉じる", "やめる"],
+        defaultId: 0,
+        cancelId: 2,
+        message: unknown ? "記録が保存済みかどうか確かめられません" : "記録がまだ保存されていません",
+        detail: unknown
+          ? "画面が応答していません。閉じると、保存していない記録は失われます。"
+          : "閉じると、この記録は失われます。",
+      });
+      if (response === 2) return;
+      if (response === 0) {
+        const saved = await ask("window.recordnesApp.saveRecordingForClose()", 120000).catch(() => false);
+        if (!saved) return; // 保存を取りやめたなら閉じない
+      }
+    }
+    console.log("[close] 閉じます");
+    closing = true;
+    if (!win.isDestroyed()) win.close();
+  } finally {
+    asking = false;
   }
-  console.log("[close] 閉じます");
-  closing = true;
-  win.close();
 }
 
 async function runSelfTest() {

@@ -210,3 +210,15 @@ test("目印を打つと、未保存として扱われる", async (t) => {
   s.mark("ここ");
   assert.notEqual(s.rec!.revision, saved, "目印も書き換えとして数える");
 });
+
+test("リセットで記録を作り直すと、未保存として扱われる", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const s = await newSession(SMB, 0);
+  for (let f = 0; f < 150; f++) s.step([0, 0]);
+  const before = s.rec!;
+  await s.reset();                     // 既定では記録ごと作り直す
+  assert.notEqual(s.rec, before, "Recorder が入れ替わる");
+  assert.equal(s.rec!.revision, 0, "新しい記録の書き換え回数は 0 から");
+  // ここで「保存したときの revision」を持ち越すと、同じ数値になって
+  // 保存済みに見えてしまう。UI 側でも戻していることを app.ts で担保している。
+});
