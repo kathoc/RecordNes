@@ -36,7 +36,7 @@ function readSettingsSync() {
     return {};
   }
 }
-if (readSettingsSync().uncapFrameRate) {
+if (process.env.RECORDNES_UNCAP === "1" || readSettingsSync().uncapFrameRate) {
   app.commandLine.appendSwitch("disable-gpu-vsync");
   app.commandLine.appendSwitch("disable-frame-rate-limit");
 }

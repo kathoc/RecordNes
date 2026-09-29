@@ -65,6 +65,8 @@ export class Pad {
   dpad = new DpadFilter();
   /** つながっているか。UI の表示に使う */
   connected = false;
+  /** この Pad が見る接続順。0 = 1P、1 = 2P */
+  slot = 0;
   /** 最後に見たボタンの状態。立ち上がり検出用 */
   private prev: boolean[] = [];
   private pending: EdgeCommand[] = [];
@@ -77,11 +79,18 @@ export class Pad {
   /** 直前のフレームで L が押されていたか */
   index = 0;
 
-  /** エミュレート直前に 1 回だけ呼ぶ。 */
+  /** エミュレート直前に 1 回だけ呼ぶ。
+   *
+   *  `slot` 番目につながっているパッドを見る。2 台目が挿さっていれば 2P になる。
+   *  番号ではなく接続順で選ぶのは、OS 側の index が抜き差しで飛ぶため。 */
   poll(): void {
     const pads = typeof navigator !== "undefined" && navigator.getGamepads ? navigator.getGamepads() : [];
     let gp: Gamepad | null = null;
-    for (const p of pads) if (p && p.connected) { gp = p; break; }
+    let seen = 0;
+    for (const p of pads) {
+      if (!p || !p.connected) continue;
+      if (seen++ === this.slot) { gp = p; break; }
+    }
     this.connected = !!gp;
     this.padBitsNow = 0;
     this.turboA = false;

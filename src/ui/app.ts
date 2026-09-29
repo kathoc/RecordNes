@@ -216,6 +216,8 @@ export class App {
       const wasPlayback = this.session.mode === "playback";
       this.session.step(snap.pads);
       this.dirty = true;
+      // 2 台目が挿さっていたら、記録にも 2 人分として残す。
+      if (this.input.twoPlayers && this.session.rec) this.session.rec.players = 2;
       if (wasPlayback && this.session.mode === "record") {
         this.rewindHint = false;
         this.toast("ここから自分のプレイを記録します");
@@ -528,6 +530,7 @@ export class App {
       label.textContent = "記録中";
     }
     $("time").textContent = formatTime(this.session.frame);
+    $("players").textContent = this.input.twoPlayers ? "2P 接続中" : "";
     $("frames").textContent = rec
       ? `${this.session.frame.toLocaleString()} / ${rec.frameCount.toLocaleString()} フレーム${rec.rewinds ? `・巻き戻し ${rec.rewinds} 回` : ""}`
       : "0 フレーム";
