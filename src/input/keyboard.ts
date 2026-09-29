@@ -38,6 +38,8 @@ export const DEFAULT_BINDINGS: KeyBindings = {
     BracketLeft: "speedDown",
     F1: "saveState",
     F2: "loadState",
+    F3: "saveStateFile",
+    F4: "loadStateFile",
     F5: "saveRecording",
     KeyM: "marker",
     KeyT: "turboCycle",

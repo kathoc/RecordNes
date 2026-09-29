@@ -62,7 +62,8 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 export class App {
-  private bridge: PlatformBridge;
+  /** 自動検証から書き出しを回すために公開している。 */
+  readonly bridge: PlatformBridge;
   private session = new Session({ runAhead: 1 });
   private input = new InputManager();
   private audio = new AudioOut();
@@ -88,6 +89,9 @@ export class App {
    *  何も変わっていないフレームまで描くと CPU を無駄に食う。 */
   private dirty = true;
   private lastStatusAt = 0;
+  /** 覚えた位置。ステートセーブの代わりに、タイムライン上の地点を覚える。
+   *  状態そのものを抱えるより軽く、記録との食い違いも起きない。 */
+  private marked: { frame: number; generation: number } | null = null;
   private busy = false;
   /** 直近の rAF で使った実時間の内訳。計測表示用 */
   private perf = { emu: 0, raf: 0, latency: 0 };
@@ -268,8 +272,10 @@ export class App {
           break;
         case "speedUp": this.setSpeed(this.speedIndex + 1); break;
         case "speedDown": this.setSpeed(this.speedIndex - 1); break;
-        case "saveState": void this.saveStateFile(); break;
-        case "loadState": void this.loadStateFile(); break;
+        case "saveState": this.rememberSpot(); break;
+        case "loadState": this.returnToSpot(); break;
+        case "saveStateFile": void this.saveStateFile(); break;
+        case "loadStateFile": void this.loadStateFile(); break;
         case "reset": void this.doReset(); break;
         case "saveRecording": void this.saveRecording(); break;
         case "marker": this.addMarker(); break;
@@ -314,6 +320,39 @@ export class App {
     }
     this.syncControls();
     this.toast(next === 4 ? "4-WAY: 斜めを出しません" : "8-WAY: 斜めを出します");
+  }
+
+  /** 今いる地点を覚える。ステートセーブに当たる操作。 */
+  private rememberSpot(): void {
+    if (!this.session.rec) return;
+    this.marked = { frame: this.session.frame, generation: this.session.rec.rewinds };
+    this.toast(`${formatTime(this.marked.frame)} を覚えました（戻るときは ${this.keyFor("loadState")}）`, "ok");
+  }
+
+  /** 覚えた地点へ戻る。巻き戻しと同じ扱いなので、記録はまだ縮まない。 */
+  private returnToSpot(): void {
+    if (!this.session.rec) return;
+    if (!this.marked) {
+      this.toast("まだどこも覚えていません", "warn");
+      return;
+    }
+    if (this.marked.frame > this.session.totalFrames) {
+      this.toast("覚えた地点は、やり直しで消えました", "warn");
+      this.marked = null;
+      return;
+    }
+    this.session.mode = "playback";
+    this.rewindHint = true;
+    this.session.seek(this.marked.frame);
+    this.audio.clear();
+    this.dirty = true;
+    this.toast(`${formatTime(this.marked.frame)} へ戻りました`);
+  }
+
+  /** その操作に割り当てられているキー。案内文に差し込む。 */
+  private keyFor(cmd: EdgeCommand): string {
+    const entry = Object.entries(this.input.keyboard.bindings.edge).find(([, v]) => v === cmd);
+    return entry ? entry[0].replace(/^Key|^Digit/, "") : "?";
   }
 
   private addMarker(): void {
@@ -776,7 +815,8 @@ export class App {
       ["Space", "一時停止 / 再開"],
       ["F", "コマ送り（押しっぱなしで連続）"],
       ["[ / ]", "速度を下げる / 上げる"],
-      ["F1 / F2", "ステートセーブ / ロード"],
+      ["F1 / F2", "今の地点を覚える / 覚えた地点へ戻る"],
+      ["F3 / F4", "ステートをファイルへ保存 / 読み込み"],
       ["F5", "記録を保存"],
       ["M", "目印を打つ"],
       ["T", "連射モード切替"],

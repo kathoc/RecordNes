@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "NES emulator built around play recording and replay",
+  "description": "プレイ記録と再生に特化した NES エミュレーター",
   "license": "MIT",
-  "author": "kathoc",
+  "author": {
+    "name": "kathoc",
+    "email": "katsuya.hokamura@gmail.com"
+  },
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
@@ -13,7 +16,14 @@
     "electron": "npm run build && electron .",
     "test": "node --experimental-strip-types --test --test-reporter=tap test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
-    "dev:electron": "RECORDNES_DEV=1 electron ."
+    "dev:electron": "RECORDNES_DEV=1 electron .",
+    "dist": "npm run build && electron-builder",
+    "dist:linux": "npm run build && electron-builder --linux --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "selftest": "npm run build && tools/selftest.sh",
+    "perftest": "npm run build && tools/perftest.sh",
+    "icon": "tools/make-icon.sh"
   },
   "dependencies": {
     "@nesjs/core": "2.7.0",
@@ -25,5 +35,98 @@
     "electron-builder": "^26.15.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
-  }
+  },
+  "homepage": "https://github.com/kathoc/RecordNes#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kathoc/RecordNes.git"
+  },
+  "build": {
+    "appId": "net.sonohoka.recordnes",
+    "productName": "RecordNes",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "shared/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "icon": "build/icon.png",
+    "fileAssociations": [
+      {
+        "ext": "rnes",
+        "name": "RecordNes の記録",
+        "role": "Editor"
+      },
+      {
+        "ext": "nes",
+        "name": "NES ROM",
+        "role": "Viewer"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game",
+      "synopsis": "プレイ記録と再生に特化した NES エミュレーター",
+      "maintainer": "kathoc <katsuya.hokamura@gmail.com>",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "RecordNes",
+      "artifactName": "${productName}-${version}-win-x64-setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-win-x64-portable.${ext}"
+    }
+  },
+  "desktopName": "recordnes.desktop"
 }

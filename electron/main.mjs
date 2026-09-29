@@ -198,13 +198,18 @@ ipcMain.handle("video:backend", async () => {
 const jobs = new Map();
 
 ipcMain.handle("video:start", async (_e, opts) => {
-  const r = await dialog.showSaveDialog(win, {
-    defaultPath: opts.path || "recordnes.mp4",
-    filters: [{ name: "MP4 動画", extensions: ["mp4"] }],
-  });
-  if (r.canceled || !r.filePath) throw new Error("書き出しを取りやめました");
+  // 自動検証では保存ダイアログを出せない。出力先を環境変数で渡せるようにする。
+  let filePath = process.env.RECORDNES_VIDEO_OUT ?? "";
+  if (!filePath) {
+    const r = await dialog.showSaveDialog(win, {
+      defaultPath: opts.path || "recordnes.mp4",
+      filters: [{ name: "MP4 動画", extensions: ["mp4"] }],
+    });
+    if (r.canceled || !r.filePath) throw new Error("書き出しを取りやめました");
+    filePath = r.filePath;
+  }
   const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  jobs.set(id, new VideoJob(ffmpegPath(), opts, r.filePath));
+  jobs.set(id, new VideoJob(ffmpegPath(), opts, filePath));
   return { id };
 });
 

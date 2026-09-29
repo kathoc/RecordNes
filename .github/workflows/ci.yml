@@ -1,0 +1,25 @@
+name: 検査
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 型検査
+        run: npm run typecheck
+      - name: ビルド
+        run: npm run build
+      # ROM を置けないので、ROM が要るテストは自動で飛ばされる。
+      # 入力・書き出しの単体テストはここで通る。
+      - name: テスト
+        run: npm test

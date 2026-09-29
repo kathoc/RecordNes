@@ -9,6 +9,8 @@ export type EdgeCommand =
   | "speedDown"
   | "saveState"
   | "loadState"
+  | "saveStateFile"
+  | "loadStateFile"
   | "reset"
   | "saveRecording"
   | "marker"
@@ -26,8 +28,10 @@ export const COMMAND_LABEL: Record<Command, string> = {
   pauseToggle: "一時停止 / 再開",
   speedUp: "速度を上げる",
   speedDown: "速度を下げる",
-  saveState: "ステートセーブ",
-  loadState: "ステートロード",
+  saveState: "今の地点を覚える",
+  loadState: "覚えた地点へ戻る",
+  saveStateFile: "ステートをファイルへ保存",
+  loadStateFile: "ステートをファイルから読み込み",
   reset: "リセット",
   saveRecording: "記録を保存",
   marker: "目印を打つ",

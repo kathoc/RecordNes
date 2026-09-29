@@ -3,6 +3,7 @@ import "./core/jam-watch.ts";
 import { App } from "./ui/app.ts";
 import { WebBridge } from "./platform/web.ts";
 import * as recordFormat from "./record/format.ts";
+import * as recordExport from "./export/exporter.ts";
 import { ElectronBridge, detectBridge } from "./platform/electron.ts";
 
 const api = detectBridge();
@@ -21,3 +22,4 @@ void app.start().then(() => {
 // 開発と自動検証のために出しておく。実アプリをそのまま動かして確かめる入口。
 (window as unknown as { recordnesApp: App }).recordnesApp = app;
 (window as unknown as { recordnesFormat: typeof recordFormat }).recordnesFormat = recordFormat;
+(window as unknown as { recordnesExport: typeof recordExport }).recordnesExport = recordExport;
