@@ -1,0 +1,19 @@
+{
+  "name": "recordnes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NES emulator built around play recording and replay",
+  "license": "MIT",
+  "author": "kathoc",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "electron": "npm run build && electron .",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@nesjs/core": "2.7.0"
+  }
+}
