@@ -146,6 +146,9 @@ export class Recorder {
   addEvent(type: TimelineEvent["type"], frame: number, label?: string): void {
     this.events.push({ frame, type, label });
     this.events.sort((a, b) => a.frame - b.frame);
+    // 目印やリセットも保存対象。数えないと、保存後に目印を打っても
+    // 「保存済み」のままになり、閉じるときの確認が出ずに黙って消える。
+    this.revision++;
   }
 
   eventsAt(frame: number): TimelineEvent[] {

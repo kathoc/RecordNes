@@ -49,6 +49,12 @@ export class Session {
 
   /** キーフレームの復元が壊れていたときに立つ。立っている間、UI は再計算中を出す */
   recovering = false;
+  /** ROM の積み直しなど、await をまたぐ作業の最中。
+   *
+   *  **この間は step を通さない。** 待っている間も rAF ループは回り続けるので、
+   *  入れ替え途中の記録に frameCount 0 のまま書き込まれ、truncate(0) で
+   *  中身が消える。呼ぶ側の busy 管理だけに頼ると、経路が増えたときに漏れる。 */
+  private loading = false;
   /** 復元に使ったキーフレームの位置。壊れていたらこれを捨てる */
   private lastRestoredFrame = -1;
   /** JAM を検知した地点。App が次の rAF で recover() を呼ぶ */
@@ -81,6 +87,15 @@ export class Session {
    *  「少し変だが鳴ってはいる」状態になって気づきにくい。 */
   async setSampleRate(rate: number): Promise<void> {
     if (!rate || rate === this.sampleRate) return;
+    this.loading = true;
+    try {
+      await this.setSampleRateInner(rate);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  private async setSampleRateInner(rate: number): Promise<void> {
     this.sampleRate = rate;
     const at = this.emu.frameCount;
     this.emu = new Emu(rate);
@@ -138,6 +153,15 @@ export class Session {
   }
 
   async loadRom(bytes: Uint8Array, info: RomInfo, title: string): Promise<void> {
+    this.loading = true;
+    try {
+      await this.loadRomInner(bytes, info, title);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  private async loadRomInner(bytes: Uint8Array, info: RomInfo, title: string): Promise<void> {
     this.romBytes = bytes.slice();
     this.romInfo = info;
     await this.emu.load(this.romBytes);
@@ -150,6 +174,15 @@ export class Session {
 
   /** 記録ファイルを開く。ROM は呼び出し側が先に読み込んでおく。 */
   async adoptRecording(rec: Recorder, atFrame: number | "tail" = "tail"): Promise<void> {
+    this.loading = true;
+    try {
+      await this.adoptRecordingInner(rec, atFrame);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  private async adoptRecordingInner(rec: Recorder, atFrame: number | "tail"): Promise<void> {
     if (!this.romBytes) throw new Error("先に ROM を読み込んでください");
     this.rec = rec;
     // 前の記録で掴んでいた位置を持ち越さない。持ち越すと、立て直しのときに
@@ -174,7 +207,7 @@ export class Session {
 
   /** 1 フレーム進める。`live` は今ポーリングしたばかりの入力。 */
   step(live: [number, number]): void {
-    if (!this.rec || !this.emu.loaded) return;
+    if (!this.rec || !this.emu.loaded || this.loading) return;
     const f = this.emu.frameCount;
 
     // 再生中に手が動いたら、そこで記録を引き継ぐ。
@@ -299,6 +332,7 @@ export class Session {
     this.pendingRecovery = null;
     if (goal === null || !this.rec || !this.romBytes) return;
     this.recovering = true;
+    this.loading = true;
     try {
       // 元凶のキーフレームを二度と使わないよう捨てる。
       if (this.lastRestoredFrame >= 0) this.rec.poison(this.lastRestoredFrame);
@@ -312,6 +346,7 @@ export class Session {
       this.snapshotHere();
     } finally {
       this.recovering = false;
+      this.loading = false;
     }
   }
 
@@ -319,11 +354,16 @@ export class Session {
   async reset(): Promise<void> {
     if (!this.rec || !this.romBytes || !this.romInfo) return;
     if (this.resetClearsRecording) {
-      await this.emu.load(this.romBytes);
-      if (this.runAhead > 0) await this.ensureAhead();
-      this.rec = new Recorder(this.romInfo, this.rec.title, "power");
-      this.mode = "record";
-      this.snapshotHere();
+      this.loading = true;
+      try {
+        await this.emu.load(this.romBytes);
+        if (this.runAhead > 0) await this.ensureAhead();
+        this.rec = new Recorder(this.romInfo, this.rec.title, "power");
+        this.mode = "record";
+        this.snapshotHere();
+      } finally {
+        this.loading = false;
+      }
       return;
     }
     // 記録を続ける場合。現在位置より先は捨て、リセットをイベントとして刻む。

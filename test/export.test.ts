@@ -4,7 +4,7 @@ import { mkdtempSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SMB, haveRom, newSession, scriptedInput } from "./helpers.ts";
-import { Exporter, resampleFrame, scaleNearest } from "../src/export/exporter.ts";
+import { Exporter, scaleNearest } from "../src/export/exporter.ts";
 import { SCREEN_H, SCREEN_W } from "../src/core/emu.ts";
 import { NodeBridge, ffprobe, measureVolume } from "./node-bridge.ts";
 
@@ -25,19 +25,6 @@ test("最近傍拡大は、画素を正確に整数倍へ複製する", () => {
       assert.deepEqual([...dst.subarray(j, j + 4)], [0, 255, 0, 255], `緑 (${x},${y})`);
     }
   }
-});
-
-test("音声の引き伸ばしは、要求された本数をきっかり返す", () => {
-  const out = new Int16Array(4096);
-  const input = Float32Array.from({ length: 799 }, (_, i) => Math.sin(i / 20));
-  for (const need of [800, 799, 1600, 1]) {
-    const carry = resampleFrame(input, need, 0, out);
-    assert.equal(typeof carry, "number");
-    assert.ok(out[need - 1] !== undefined, `${need} 本目まで書かれている`);
-  }
-  // 入力が無くても落ちない（早送りで音を捨てた直後など）
-  resampleFrame(new Float32Array(0), 800, 0.5, out);
-  assert.equal(out[0], Math.round(0.5 * 32767));
 });
 
 test("フレームレートを変えても、動画の長さが実時間と一致する", async (t) => {
@@ -66,9 +53,9 @@ test("フレームレートを変えても、動画の長さが実時間と一�
       Math.abs(dur - realSeconds) < 0.08,
       `${fps}fps: 長さ ${dur.toFixed(3)} 秒（実時間 ${realSeconds.toFixed(3)} 秒）`,
     );
-    const expectedFrames = Math.floor((FRAMES * fps) / 60.0978);
+    const expectedFrames = Math.ceil((FRAMES * fps) / 60.0978);
     const actual = Number(video.nb_frames ?? expectedFrames);
-    assert.ok(Math.abs(actual - expectedFrames) <= 1, `${fps}fps: 枚数 ${actual}（期待 ${expectedFrames}）`);
+    assert.equal(actual, expectedFrames, `${fps}fps: 枚数`);
     const adur = Number(audio.duration ?? dur);
     assert.ok(Math.abs(adur - dur) < 0.08, `${fps}fps: 映像 ${dur} 秒 と 音声 ${adur} 秒 のずれ`);
   }
@@ -104,7 +91,7 @@ test("記録から mp4 を書き出し、長さ・解像度・音声が仕様ど
   assert.equal(video.height, SCREEN_H * 2);
   assert.equal(video.codec_name, "h264");
   // NES は 60.0978fps なので、60fps の動画では 300 エミュレートフレームが 299 枚になる。
-  const expectedFrames = Math.floor((FRAMES * 60) / 60.0978);
+  const expectedFrames = Math.ceil((FRAMES * 60) / 60.0978);
   assert.equal(Number(video.nb_frames ?? expectedFrames), expectedFrames, "動画の枚数");
   assert.equal(video.r_frame_rate, "60/1");
   assert.ok(audio, "音声ストリームがある");

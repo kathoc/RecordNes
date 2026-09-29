@@ -42,6 +42,8 @@ if (process.env.RECORDNES_UNCAP === "1" || readSettingsSync().uncapFrameRate) {
 }
 
 let win = null;
+/** 閉じてよいと決まったあと。二重に尋ねない */
+let closing = false;
 
 /** 起動時に開くファイル。コマンドライン引数か、OS の「このアプリで開く」から来る。
  *  自動検証でも使う: `electron . path/to/game.nes` で ROM を読んだ状態から始まる。 */
@@ -68,11 +70,29 @@ async function createWindow() {
   });
   win.setMenuBarVisibility(false);
 
+  // **未保存の確認は main 側で出す。**
+  // renderer の beforeunload の中で confirm() を呼んでも、Chromium が
+  // `Blocked confirm(...) during beforeunload` として握りつぶす。
+  // 画面には何も出ないまま「保存しない」を選んだ扱いになり、記録が黙って消えた。
+  win.on("close", (e) => {
+    if (closing) return;
+    e.preventDefault();
+    void askBeforeClose();
+  });
+
   // renderer 側の console を main の標準出力へ出す。自動検証で中を見る唯一の窓。
   win.webContents.on("console-message", (_e, level, message, line, source) => {
     const tag = ["log", "warn", "error", "info"][level] ?? level;
     console.log(`[renderer:${tag}] ${message} (${String(source).split("/").pop()}:${line})`);
   });
+
+  // 自動検証用。指定秒後に、利用者が閉じたのと同じ経路で閉じにいく。
+  if (process.env.RECORDNES_CLOSE_AFTER) {
+    setTimeout(() => {
+      console.log("[close] 閉じる操作を送ります");
+      win.close();
+    }, Number(process.env.RECORDNES_CLOSE_AFTER) * 1000);
+  }
 
   win.webContents.on("did-finish-load", async () => {
     if (selfTest) void runSelfTest();
@@ -104,6 +124,38 @@ ipcMain.handle("shot", async (_e, name) => {
   return out;
 });
 
+async function askBeforeClose() {
+  let unsaved = false;
+  try {
+    unsaved = await win.webContents.executeJavaScript(
+      "Boolean(window.recordnesApp && window.recordnesApp.hasUnsavedWork && window.recordnesApp.hasUnsavedWork())",
+      true,
+    );
+  } catch { /* 画面が応答しないなら、止めずに閉じる */ }
+
+  if (unsaved) {
+    console.log("[close] 未保存の記録があるので確認を出します");
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["保存して閉じる", "保存せずに閉じる", "やめる"],
+      defaultId: 0,
+      cancelId: 2,
+      message: "記録がまだ保存されていません",
+      detail: "閉じると、この記録は失われます。",
+    });
+    if (response === 2) return;
+    if (response === 0) {
+      const saved = await win.webContents
+        .executeJavaScript("window.recordnesApp.saveRecordingForClose()", true)
+        .catch(() => false);
+      if (!saved) return; // 保存を取りやめたなら閉じない
+    }
+  }
+  console.log("[close] 閉じます");
+  closing = true;
+  win.close();
+}
+
 async function runSelfTest() {
   const script = await readFile(selfTest, "utf8");
   let result;
@@ -116,6 +168,7 @@ async function runSelfTest() {
   const text = JSON.stringify(result, null, 2);
   if (out) await writeFile(out, text);
   console.log(`[selftest] ${text}`);
+  closing = true;   // 自動検証では未保存の確認を出さない
   app.quit();
 }
 
@@ -216,7 +269,7 @@ ipcMain.handle("video:start", async (_e, opts) => {
 ipcMain.handle("video:write", async (_e, id, video, audio) => {
   const job = jobs.get(id);
   if (!job) throw new Error("書き出しの作業が見つかりません");
-  await job.write(Buffer.from(video), audio ? Buffer.from(audio) : null);
+  await job.write(video ? Buffer.from(video) : null, audio ? Buffer.from(audio) : null);
 });
 
 ipcMain.handle("video:finish", async (_e, id) => {

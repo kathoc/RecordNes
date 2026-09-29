@@ -77,11 +77,10 @@ test("書き出した動画の各フレームが、記録どおりの絵と順�
   // 動画の k 枚目がエミュレートの何フレーム目かもずれる。対応表を作る。
   const NES_FPS = 60.0978;
   const source: number[] = [];   // 動画の k 枚目 -> エミュレートのフレーム番号
-  let emitted = 0;
-  for (let i = 0; i < FRAMES; i++) {
-    const want = Math.floor(((i + 1) * 60) / NES_FPS);
-    while (emitted < want) { source.push(i); emitted++; }
+  for (let k = 0; Math.floor((k * NES_FPS) / 60) < FRAMES; k++) {
+    source.push(Math.floor((k * NES_FPS) / 60));
   }
+  assert.equal(source[0], 0, "区間の先頭が 1 枚目になっている");
   assert.equal(decoded.length, source.length, "動画の枚数が計算どおり");
 
   // エミュレーターをもう一度回して、同じ位置の絵を作る。

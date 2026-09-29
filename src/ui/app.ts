@@ -99,8 +99,6 @@ export class App {
   private marked: { frame: number; since: number } | null = null;
   /** 最後に保存したときのフレーム数。これと違えば「まだ保存していない」 */
   savedAtFrames = -1;
-  /** 閉じてよいと判断したあと。二度目の確認を出さない */
-  private allowClose = false;
   private busy = false;
   /** 直近の rAF で使った実時間の内訳。計測表示用 */
   private perf = { emu: 0, raf: 0, latency: 0 };
@@ -430,6 +428,7 @@ export class App {
       this.romInfo = info;
       this.savedAtFrames = -1;
       this.recordingRevision = -1;
+      this.marked = null;   // 覚えた地点は前の記録のもの。持ち越さない
       this.input.reset();
       this.input.setWays(this.settings.ways[info.sha1] ?? 8);
       this.audio.clear();
@@ -481,17 +480,9 @@ export class App {
     return rec.revision !== this.recordingRevision;
   }
 
-  /** 閉じる直前の確認。**記録は明示的に保存する決まりなので、ここで聞かないと
-   *  そのまま消える。** 1 時間遊んだ記録が黙って消えるのが最悪の結末。 */
-  private async confirmClose(): Promise<void> {
-    const t = formatTime(this.session.totalFrames);
-    const save = confirm(
-      `記録 (${t}) がまだ保存されていません。\n\n` +
-      `[OK] 保存してから閉じる\n[キャンセル] 保存せずに閉じる`,
-    );
-    if (save && !(await this.saveRecording())) return; // 保存を取りやめたら閉じない
-    this.allowClose = true;
-    window.close();
+  /** 閉じる前に main から呼ばれる。保存できたら true。 */
+  saveRecordingForClose(): Promise<boolean> {
+    return this.saveRecording();
   }
 
   private async openRecording(): Promise<void> {
@@ -525,6 +516,7 @@ export class App {
       this.session.mode = resume ? "record" : "playback";
       this.savedAtFrames = rec.frameCount;   // 読み込んだ内容はディスクにある
       this.recordingRevision = rec.revision;
+      this.marked = null;
       this.audio.clear();
       this.setPaused(false);
       this.setSpeed(NORMAL_SPEED);
@@ -555,6 +547,7 @@ export class App {
       if (!this.session.emu.loadState(f.bytes)) throw new Error("このステートは読み込めません");
       const rec = this.session.rec;
       const next = new Recorder(rec.rom, rec.title, "savestate");
+      this.marked = null;
       next.originState = f.bytes.slice();
       this.session.rec = next;
       this.session.emu.frameCount = 0;
@@ -769,12 +762,15 @@ export class App {
       });
     });
 
-    window.addEventListener("beforeunload", (e) => {
-      if (this.allowClose || !this.hasUnsavedWork()) return;
-      e.preventDefault();
-      e.returnValue = "";
-      void this.confirmClose();
-    });
+    // ブラウザ版だけの引き止め。Electron 版は main 側がネイティブの
+    // ダイアログを出す (beforeunload の中では confirm() が握りつぶされる)。
+    if (this.bridge.name === "web") {
+      window.addEventListener("beforeunload", (e) => {
+        if (!this.hasUnsavedWork()) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+    }
 
     // 音声は最初のクリックで起こす (自動再生制限)。
     const wake = (): void => { void this.startAudio(); document.removeEventListener("pointerdown", wake); };
@@ -799,6 +795,7 @@ export class App {
       await this.session.adoptRecording(rec, "tail");
       this.savedAtFrames = rec.frameCount;
       this.recordingRevision = this.session.rec?.revision ?? 0;
+      this.marked = null;
       this.toast("記録を読み込みました", "ok");
     } catch (err) {
       this.toast((err as Error).message, "warn");
@@ -808,10 +805,12 @@ export class App {
     }
   }
 
-  /** 押している間だけ旗を立てるボタン。 */
+  /** 押している間だけ旗を立てるボタン。
+   *  ポインタ捕捉は使わない。ID を決め打ちすると環境によって例外になり、
+   *  かえって離したことを取りこぼす。window 側で必ず下ろす方が確実。 */
   private holdFlag(id: string, set: (on: boolean) => void): void {
     const el = $(id);
-    el.onpointerdown = () => { set(true); el.setPointerCapture?.(1); };
+    el.onpointerdown = () => set(true);
     const off = (): void => set(false);
     el.onpointerup = off;
     el.onpointerleave = off;

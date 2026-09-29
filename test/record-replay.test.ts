@@ -185,3 +185,28 @@ test("覚えた地点は、そこより前を切り詰めたときだけ無効�
   for (let f = 50; f < 120; f++) s.step(script(f));
   assert.equal(s.rec!.isStable(at, since), false, "前を撮り直したら無効になる");
 });
+
+test("ROM を積み直している最中は、記録に書き込まない", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const s = await newSession(SMB, 0);
+  const script = scriptedInput(61);
+  for (let f = 0; f < 200; f++) s.step(script(f));
+  const before = s.totalFrames;
+
+  // await をまたぐ作業の最中に step が来ても、記録を壊さないこと。
+  // (実際の UI では rAF ループがこれをやる)
+  const work = s.setSampleRate(44100);
+  for (let i = 0; i < 50; i++) s.step([0, 0]);
+  await work;
+  assert.equal(s.totalFrames, before, "待っている間の step で記録が消えない");
+  assert.equal(s.frame, before, "同じ位置に戻ってくる");
+});
+
+test("目印を打つと、未保存として扱われる", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const s = await newSession(SMB, 0);
+  for (let f = 0; f < 120; f++) s.step([0, 0]);
+  const saved = s.rec!.revision;
+  s.mark("ここ");
+  assert.notEqual(s.rec!.revision, saved, "目印も書き換えとして数える");
+});

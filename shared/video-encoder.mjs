@@ -53,7 +53,9 @@ export function muxPassArgs(opts, videoPath, pcmPath, outPath) {
     "-f", "s16le", "-ar", String(opts.sampleRate), "-ac", "1", "-i", pcmPath,
     "-c:v", "copy",
     "-c:a", "aac", "-b:a", String(opts.audioBitrate ?? "192k"), "-ac", "2",
-    "-shortest", "-movflags", "+faststart",
+    // -shortest は付けない。音は映像より最大 1 フレームぶん短くなるので
+    // (NES の 60.0978fps と動画の fps のずれ)、付けると映像の末尾が切られる。
+    "-movflags", "+faststart",
     outPath,
   ];
 }
@@ -99,10 +101,12 @@ export class VideoJob {
   async write(video, audio) {
     if (this.failed) throw this.failed;
     // 音声はファイルへ書くので、映像の詰まりに巻き込まれない。
-    const jobs = [writeTo(this.child.stdio[3], video)];
+    // 映像を出さない回でも音は流し続ける（フレームレートを落としたとき）。
+    const jobs = [];
+    if (video) jobs.push(writeTo(this.child.stdio[3], video));
     if (this.pcm && audio && audio.length) jobs.push(writeTo(this.pcm, audio));
     await Promise.all(jobs);
-    this.frames++;
+    if (video) this.frames++;
   }
 
   async finish() {

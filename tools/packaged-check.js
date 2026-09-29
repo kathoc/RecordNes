@@ -6,7 +6,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = [];
 const check = (name, ok, detail) => log.push({ name, ok: !!ok, detail });
 
-for (let i = 0; i < 100 && !s.rec; i++) await sleep(100);
+for (let i = 0; i < 100 && !(s.rec && s.frame > 0); i++) await sleep(100);
 check("ROM が読み込まれ記録が始まる", !!s.rec && s.frame > 0, { frame: s.frame });
 check("Electron の橋がつながっている", !!window.recordnes, {});
 

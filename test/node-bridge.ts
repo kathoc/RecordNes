@@ -31,8 +31,11 @@ export class NodeBridge implements PlatformBridge {
     const job = new VideoJob(ffmpegBinary(), opts, this.outPath);
     return {
       id: "test",
-      write: (video: Uint8Array, audio: Int16Array | null) =>
-        job.write(Buffer.from(video), audio ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength) : null),
+      write: (video: Uint8Array | null, audio: Int16Array | null) =>
+        job.write(
+          video ? Buffer.from(video) : null,
+          audio ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength) : null,
+        ),
       finish: () => job.finish(),
       cancel: () => job.cancel(),
     };

@@ -27,8 +27,9 @@ export interface VideoOptions {
 
 export interface VideoJob {
   id: string;
-  /** RGBA の 1 フレーム (width*height*4) と、そのフレーム分の音声サンプル */
-  write(video: Uint8Array, audio: Int16Array | null): Promise<void>;
+  /** RGBA の 1 フレーム (width*height*4) と、その時点までの音声サンプル。
+   *  映像を出さない回 (フレームレートを落としたとき) は `video` に null を渡す。 */
+  write(video: Uint8Array | null, audio: Int16Array | null): Promise<void>;
   finish(): Promise<string>;
   cancel(): Promise<void>;
 }

@@ -88,8 +88,28 @@ export class AudioOut {
 
   /** ユーザー操作の中で呼ぶこと (自動再生制限)。 */
   async start(): Promise<void> {
-    if (this.started) return;
+    if (this.started || this.starting) return;
+    this.starting = true;
+    try {
+      await this.open();
+    } catch (err) {
+      // 失敗したら作りかけを畳む。畳まずに再試行すると、呼ばれるたびに
+      // AudioContext が積み上がる（環境によっては数個で上限に当たる）。
+      await this.ctx?.close().catch(() => {});
+      this.ctx = null;
+      this.node = null;
+      this.gain = null;
+      throw err;
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private starting = false;
+
+  private async open(): Promise<void> {
     const ctx = new AudioContext({ latencyHint: "interactive" });
+    this.ctx = ctx;   // 途中で失敗しても畳めるよう、作った時点で持っておく
     const url = URL.createObjectURL(new Blob([PROCESSOR_SOURCE], { type: "text/javascript" }));
     try {
       await ctx.audioWorklet.addModule(url);
@@ -104,7 +124,6 @@ export class AudioOut {
     const gain = ctx.createGain();
     gain.gain.value = this.muted ? 0 : this.volume;
     node.connect(gain).connect(ctx.destination);
-    this.ctx = ctx;
     this.node = node;
     this.gain = gain;
     // resume が落ちることがある。started を先に立てると「音は出ているはず」

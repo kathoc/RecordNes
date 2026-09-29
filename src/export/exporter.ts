@@ -72,25 +72,14 @@ export function scaleNearest(src: Uint8Array, scale: number, dst: Uint8Array): v
   }
 }
 
-/** 1 フレーム分の音声を、必要な本数へ線形補間で写す。 */
-export function resampleFrame(input: Float32Array, need: number, carry: number, out: Int16Array): number {
-  if (need <= 0) return input.length ? input[input.length - 1] : carry;
-  const n = input.length;
-  if (n === 0) {
-    out.fill(Math.max(-32768, Math.min(32767, Math.round(carry * 32767))), 0, need);
-    return carry;
+/** 浮動小数の -1..1 を 16bit PCM へ。 */
+function toPcm(samples: number[], out: Int16Array): Int16Array {
+  const view = out.length >= samples.length ? out : new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.round(samples[i] * 32767);
+    view[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
-  for (let i = 0; i < need; i++) {
-    // [carry, input[0..n-1]] の n+1 本を、need 本へ写す
-    const pos = (i * n) / need;
-    const i0 = Math.floor(pos);
-    const frac = pos - i0;
-    const a = i0 === 0 ? carry : input[i0 - 1];
-    const b = input[Math.min(i0, n - 1)];
-    const v = a + (b - a) * frac;
-    out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
-  }
-  return input[n - 1];
+  return view.subarray(0, samples.length);
 }
 
 export class Exporter {
@@ -166,12 +155,11 @@ export class Exporter {
     const job = await bridge.startVideo(opts);
 
     const scaled = new Uint8Array(width * height * 4);
-    let pending: number[] = [];
-    emu.setSink(settings.audio ? (s) => pending.push(s) : null);
-    let carry = 0;
+    const pending: number[] = [];
+    emu.setSink(settings.audio ? (v) => pending.push(v) : null);
     /** 書き出した動画フレーム数。エミュレートしたフレーム数とは一致しない。 */
     let emitted = 0;
-    let audioBuf = new Int16Array(8192);
+    let pcm = new Int16Array(8192);
 
     try {
       for (let i = 0; i < total; i++) {
@@ -180,9 +168,10 @@ export class Exporter {
         for (const e of rec.events) if (e.frame === f && e.type === "reset") emu.reset();
         const [a, b] = rec.inputAt(f);
         clearJam();
+        pending.length = 0;
         emu.step(a, b);
 
-        // 復元できないキーフレームから始めていた場合、ここで CPU が止まる。
+        // 復元できない状態から始めていた場合、ここで CPU が止まる。
         // 気づかずに続けると、固まった絵のまま長さだけある動画ができあがる。
         if (consumeJam()) {
           throw new Error(
@@ -201,33 +190,28 @@ export class Exporter {
         // **エミュレートしたフレームと動画のフレームは 1 対 1 ではない。**
         // NES は毎秒 60.0978 フレームで、動画に選べる 60 / 59.94 / 30 のどれとも
         // 違う。1 フレーム = 1 枚で書くと、30fps を選んだとき長さが倍になる。
-        // 出すべき枚数を累計から決め、足りなければ複製し、余れば捨てる。
-        const want = Math.floor(((i + 1) * settings.fps) / NES_FPS);
-        const frames = want - emitted;
-        if (frames <= 0) continue; // この回は絵を出さない。音は溜めたままにする
+        //
+        // 動画の k 枚目が写すのは、エミュレートの floor(k * 60.0978 / fps) 番目。
+        // k = 0 は必ず 0 番目になるので、区間の先頭が落ちることもない。
+        let frames = 0;
+        while (Math.floor(((emitted + frames) * NES_FPS) / settings.fps) <= i) frames++;
 
-        scaleNearest(emu.pixels, settings.scale, scaled);
+        // **音声は動画の枚数に合わせて詰めない。** 絵を間引いた回の音を次の
+        // 1 枚ぶんへ押し込むと、そこだけ倍速になって耳に付く。実測: 60fps で
+        // 1198 枚中 2 枚が 2 倍速だった。音はそのままの本数で流し続ける。
+        // 動画の長さ emitted/fps と音の長さ (i+1)/60.0978 のずれは 1 枚ぶん
+        // 未満に収まり、積み上がらない。
+        const audio = settings.audio && pending.length ? toPcm(pending, pcm) : null;
+        if (audio && audio.length > pcm.length) pcm = new Int16Array(audio.length * 2);
 
-        let chunk: Int16Array | null = null;
-        if (settings.audio) {
-          // この回に出す全フレーム分の音をまとめて作り、あとで切り分ける。
-          const needTotal =
-            Math.floor(((emitted + frames) * emu.sampleRate) / settings.fps) -
-            Math.floor((emitted * emu.sampleRate) / settings.fps);
-          if (audioBuf.length < needTotal) audioBuf = new Int16Array(needTotal * 2);
-          carry = resampleFrame(Float32Array.from(pending), needTotal, carry, audioBuf);
-          pending.length = 0;
-          chunk = audioBuf.subarray(0, needTotal);
+        if (frames === 0) {
+          if (audio) await job.write(null, audio);
+          continue;
         }
 
-        let offset = 0;
+        scaleNearest(emu.pixels, settings.scale, scaled);
         for (let k = 0; k < frames; k++) {
-          const need = chunk
-            ? Math.floor(((emitted + 1) * emu.sampleRate) / settings.fps) -
-              Math.floor((emitted * emu.sampleRate) / settings.fps)
-            : 0;
-          await job.write(scaled, chunk ? chunk.subarray(offset, offset + need) : null);
-          offset += need;
+          await job.write(scaled, k === 0 ? audio : null);
           emitted++;
         }
       }

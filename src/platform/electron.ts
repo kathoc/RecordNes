@@ -8,7 +8,7 @@ export interface ElectronApi {
   loadSettings(): Promise<Record<string, unknown>>;
   saveSettings(v: Record<string, unknown>): Promise<void>;
   videoStart(opts: VideoOptions): Promise<{ id: string }>;
-  videoWrite(id: string, video: ArrayBuffer, audio: ArrayBuffer | null): Promise<void>;
+  videoWrite(id: string, video: ArrayBuffer | null, audio: ArrayBuffer | null): Promise<void>;
   videoFinish(id: string): Promise<string>;
   videoCancel(id: string): Promise<void>;
   videoBackend(): Promise<string | null>;
@@ -53,10 +53,14 @@ export class ElectronBridge implements PlatformBridge {
     const api = this.api;
     return {
       id,
-      async write(video: Uint8Array, audio: Int16Array | null) {
-        const v = video.slice();
+      async write(video: Uint8Array | null, audio: Int16Array | null) {
+        const v = video ? video.slice() : null;
         const a = audio ? audio.slice() : null;
-        await api.videoWrite(id, v.buffer as ArrayBuffer, a ? (a.buffer as ArrayBuffer) : null);
+        await api.videoWrite(
+          id,
+          v ? (v.buffer as ArrayBuffer) : null,
+          a ? (a.buffer as ArrayBuffer) : null,
+        );
       },
       finish: () => api.videoFinish(id),
       cancel: () => api.videoCancel(id),
