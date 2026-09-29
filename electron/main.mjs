@@ -22,14 +22,26 @@ const isDev = !app.isPackaged && process.env.RECORDNES_DEV === "1";
 /** 自動検証。`RECORDNES_SELFTEST=<script.js>` を付けて起動すると、そのスクリプトを
  *  画面の中で走らせ、結果を `RECORDNES_SELFTEST_OUT` へ書いて終了する。
  *  実際のアプリを実際のループで動かしたまま確かめるための唯一の入口。 */
-const selfTest = process.env.RECORDNES_SELFTEST ?? "";
-
 /** 自動検証のための迂回（保存ダイアログを出さない等）を許すかどうか。
  *
  *  環境変数だけを条件にすると、たまたま同じ名前の変数が入っている環境で
  *  配布物がダイアログを出さずに上書きしてしまう。**明示の引数を要る**ことに
  *  して、普通に起動したアプリでは決して働かないようにする。 */
 const testMode = process.argv.includes("--recordnes-test-mode");
+
+/** 画面の中で走らせる検証スクリプト。**任意の JS を実行できるので、
+ *  テスト用の引数が無いときは決して読まない。** 環境変数だけを条件にすると、
+ *  仕込まれた変数で配布物が何でも実行してしまう。 */
+const selfTest = testMode ? (process.env.RECORDNES_SELFTEST ?? "") : "";
+
+/** 指定秒後に自分で閉じる（終了時の確認を試すため）。 */
+function closeAfterSeconds() {
+  if (!testMode) return 0;
+  const v = Number(process.env.RECORDNES_CLOSE_AFTER);
+  // 数値でないものが入ると NaN になり、setTimeout が即発火して
+  // 起動直後に勝手に閉じる。正の数だけを受ける。
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
 
 /** フレーム制限の解除。
  *
@@ -101,11 +113,12 @@ async function createWindow() {
   });
 
   // 自動検証用。指定秒後に、利用者が閉じたのと同じ経路で閉じにいく。
-  if (process.env.RECORDNES_CLOSE_AFTER) {
+  const closeAfter = closeAfterSeconds();
+  if (closeAfter > 0) {
     setTimeout(() => {
       console.log("[close] 閉じる操作を送ります");
       win.close();
-    }, Number(process.env.RECORDNES_CLOSE_AFTER) * 1000);
+    }, closeAfter * 1000);
   }
 
   win.webContents.on("did-finish-load", async () => {

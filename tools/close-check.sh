@@ -27,7 +27,7 @@ run() { # run <ログ名> <引数>
   # 設定を持ち越さない。uncapFrameRate が入っていると rAF が数百Hzで回り、
   # 画面への問い合わせが時間切れして別の分岐に落ちる。
   DISPLAY="$DISP" RECORDNES_CLOSE_AFTER=6 \
-    timeout 20 "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
+    timeout 20 "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox --recordnes-test-mode \
       --user-data-dir="$ROOT/tmp/userdata-close-$$" "$@" \
     > "$ROOT/tmp/close-$name.log" 2>&1
   echo "$?"
