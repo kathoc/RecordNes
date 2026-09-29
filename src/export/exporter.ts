@@ -10,7 +10,8 @@
  *  必要な本数へ引き伸ばす**。1 フレーム分の音を、そのフレームに要る本数へ線形補間で
  *  写すだけなので、ずれは構造的に生じない。音程の変化は 0.16%(2.8 セント)で聞き取れない。 */
 
-import { Emu, SCREEN_H, SCREEN_W } from "../core/emu.ts";
+import { Emu, NES_FPS, SCREEN_H, SCREEN_W } from "../core/emu.ts";
+import { clearJam, consumeJam } from "../core/jam-watch.ts";
 import { Recorder } from "../record/recorder.ts";
 import type { PlatformBridge, VideoOptions } from "../platform/types.ts";
 
@@ -136,12 +137,21 @@ export class Exporter {
       emu.frameCount = k.frame;
     }
     emu.setSink(null);
+    clearJam();
     while (emu.frameCount < from) {
       const f = emu.frameCount;
       for (const e of rec.events) if (e.frame === f && e.type === "reset") emu.reset();
       const [a, b] = rec.inputAt(f);
       emu.step(a, b);
       if (this.cancelled) throw new Error("書き出しを取りやめました");
+    }
+    // 開始位置へ着くまでに止まっていたら、ここから先は固まった絵しか出ない。
+    // 長さだけある無意味な動画を渡さないよう、始める前に弾く。
+    if (consumeJam()) {
+      throw new Error(
+        "この区間の先頭の状態を復元できませんでした。区間の先頭を少しずらすか、" +
+        "0 フレーム目から書き出してください。",
+      );
     }
 
     const opts: VideoOptions = {
@@ -159,8 +169,9 @@ export class Exporter {
     let pending: number[] = [];
     emu.setSink(settings.audio ? (s) => pending.push(s) : null);
     let carry = 0;
-    let producedSamples = 0;
-    const audioBuf = new Int16Array(4096);
+    /** 書き出した動画フレーム数。エミュレートしたフレーム数とは一致しない。 */
+    let emitted = 0;
+    let audioBuf = new Int16Array(8192);
 
     try {
       for (let i = 0; i < total; i++) {
@@ -168,27 +179,56 @@ export class Exporter {
         const f = emu.frameCount;
         for (const e of rec.events) if (e.frame === f && e.type === "reset") emu.reset();
         const [a, b] = rec.inputAt(f);
-        pending.length = 0;
+        clearJam();
         emu.step(a, b);
 
-        scaleNearest(emu.pixels, settings.scale, scaled);
-
-        let audio: Int16Array | null = null;
-        if (settings.audio) {
-          // このフレームの終わりまでに出ているべき累計本数から、今回の本数を決める。
-          const wantTotal = Math.floor(((i + 1) * emu.sampleRate) / settings.fps);
-          const need = wantTotal - producedSamples;
-          const view = audioBuf.subarray(0, Math.min(need, audioBuf.length));
-          carry = resampleFrame(Float32Array.from(pending), view.length, carry, audioBuf);
-          producedSamples += view.length;
-          audio = view;
+        // 復元できないキーフレームから始めていた場合、ここで CPU が止まる。
+        // 気づかずに続けると、固まった絵のまま長さだけある動画ができあがる。
+        if (consumeJam()) {
+          throw new Error(
+            "書き出しの途中で状態を復元できませんでした。" +
+            "区間の先頭を少しずらすか、0 フレーム目から書き出してください。",
+          );
         }
-        await job.write(scaled, audio);
 
         if (i % 30 === 0 || i === total - 1) {
           onProgress({ phase: "encode", frame: i + 1, total, elapsed: (Date.now() - t0) / 1000 });
-          // UI を固まらせない。
+          // UI を固まらせない。絵を出さない回もここを通る必要がある
+          // (30fps では 2 回に 1 回しか出さないため)。
           await new Promise((r) => setTimeout(r, 0));
+        }
+
+        // **エミュレートしたフレームと動画のフレームは 1 対 1 ではない。**
+        // NES は毎秒 60.0978 フレームで、動画に選べる 60 / 59.94 / 30 のどれとも
+        // 違う。1 フレーム = 1 枚で書くと、30fps を選んだとき長さが倍になる。
+        // 出すべき枚数を累計から決め、足りなければ複製し、余れば捨てる。
+        const want = Math.floor(((i + 1) * settings.fps) / NES_FPS);
+        const frames = want - emitted;
+        if (frames <= 0) continue; // この回は絵を出さない。音は溜めたままにする
+
+        scaleNearest(emu.pixels, settings.scale, scaled);
+
+        let chunk: Int16Array | null = null;
+        if (settings.audio) {
+          // この回に出す全フレーム分の音をまとめて作り、あとで切り分ける。
+          const needTotal =
+            Math.floor(((emitted + frames) * emu.sampleRate) / settings.fps) -
+            Math.floor((emitted * emu.sampleRate) / settings.fps);
+          if (audioBuf.length < needTotal) audioBuf = new Int16Array(needTotal * 2);
+          carry = resampleFrame(Float32Array.from(pending), needTotal, carry, audioBuf);
+          pending.length = 0;
+          chunk = audioBuf.subarray(0, needTotal);
+        }
+
+        let offset = 0;
+        for (let k = 0; k < frames; k++) {
+          const need = chunk
+            ? Math.floor(((emitted + 1) * emu.sampleRate) / settings.fps) -
+              Math.floor((emitted * emu.sampleRate) / settings.fps)
+            : 0;
+          await job.write(scaled, chunk ? chunk.subarray(offset, offset + need) : null);
+          offset += need;
+          emitted++;
         }
       }
       onProgress({ phase: "finish", frame: total, total, elapsed: (Date.now() - t0) / 1000 });

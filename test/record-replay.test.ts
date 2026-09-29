@@ -148,3 +148,40 @@ test("途中で保存して、別セッションで続きから記録できる",
   for (let f = 0; f < 400; f++) straight.step(script(f));
   assert.equal(day2Hash, hashPixels(straight.emu.pixels));
 });
+
+test("巻き戻して同じ長さまで撮り直すと、未保存として扱われる", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const s = await newSession(SMB, 0);
+  const a = scriptedInput(51);
+  for (let f = 0; f < 300; f++) s.step(a(f));
+  const savedRevision = s.rec!.revision;
+  const savedFrames = s.totalFrames;
+
+  s.rewind(100);
+  const b = scriptedInput(52);
+  for (let f = 200; f < 300; f++) s.step(b(f));
+
+  assert.equal(s.totalFrames, savedFrames, "長さは元に戻っている");
+  assert.notEqual(s.rec!.revision, savedRevision, "長さが同じでも書き換わったと分かる");
+});
+
+test("覚えた地点は、そこより前を切り詰めたときだけ無効になる", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const s = await newSession(SMB, 0);
+  const script = scriptedInput(53);
+  for (let f = 0; f < 300; f++) s.step(script(f));
+
+  const at = 100;
+  const since = s.rec!.truncMark();
+  assert.equal(s.rec!.isStable(at, since), true);
+
+  // 覚えた地点より後ろを撮り直しても、その地点は生きている。
+  s.rewind(50);
+  for (let f = 250; f < 300; f++) s.step(script(f));
+  assert.equal(s.rec!.isStable(at, since), true, "後ろの撮り直しでは無効にならない");
+
+  // 覚えた地点より前を撮り直したら、中身が変わるので無効。
+  s.rewind(250);
+  for (let f = 50; f < 120; f++) s.step(script(f));
+  assert.equal(s.rec!.isStable(at, since), false, "前を撮り直したら無効になる");
+});

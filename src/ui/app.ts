@@ -7,7 +7,7 @@
  *  どれか 1 つでも次の rAF へまたぐと、そこで 1 フレーム遅れる。入力を採るのは
  *  エミュレートの直前ただ 1 か所で、イベント受信時ではない。 */
 
-import { SCREEN_H, SCREEN_W, describeInput } from "../core/emu.ts";
+import { NES_FPS, SCREEN_H, SCREEN_W, describeInput } from "../core/emu.ts";
 import { Session } from "../core/session.ts";
 import { identifyRom, displayTitle } from "../core/romid.ts";
 import type { RomInfo } from "../core/romid.ts";
@@ -23,8 +23,7 @@ import type { PlatformBridge } from "../platform/types.ts";
 import { DEFAULT_EXPORT, Exporter, type ExportSettings } from "../export/exporter.ts";
 import type { Ways } from "../input/dpad.ts";
 
-/** NES の実フレームレート。音声サンプル数から実測した値 (tools/audio-rate-probe.mjs)。 */
-export const NES_FPS = 60.0978;
+export { NES_FPS };
 const FRAME_MS = 1000 / NES_FPS;
 
 const SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8];
@@ -85,13 +84,19 @@ export class App {
   private stepOnce = 0;
   /** 巻き戻し直後の案内を出すか */
   private rewindHint = false;
+  /** 画面の巻き戻しボタンを押している間 true。主ループがこれを見る */
+  private mouseRewind = false;
+  /** 画面の早送りボタンを押している間 true */
+  private mouseFastForward = false;
+  /** 記録が書き換わった回数。保存済みかどうかの判定に使う */
+  private recordingRevision = 0;
   /** 画面を描き直す必要があるか。vsync 制限を外すと rAF が数百 Hz で回るので、
    *  何も変わっていないフレームまで描くと CPU を無駄に食う。 */
   private dirty = true;
   private lastStatusAt = 0;
   /** 覚えた位置。ステートセーブの代わりに、タイムライン上の地点を覚える。
    *  状態そのものを抱えるより軽く、記録との食い違いも起きない。 */
-  private marked: { frame: number; generation: number } | null = null;
+  private marked: { frame: number; since: number } | null = null;
   /** 最後に保存したときのフレーム数。これと違えば「まだ保存していない」 */
   savedAtFrames = -1;
   /** 閉じてよいと判断したあと。二度目の確認を出さない */
@@ -173,7 +178,7 @@ export class App {
 
     const t0 = performance.now();
     if (this.session.rec && this.romInfo) {
-      if (snap.held.has("rewind")) {
+      if (snap.held.has("rewind") || this.mouseRewind) {
         this.doRewind(dt);
       } else {
         this.runFrames(dt, snap);
@@ -198,7 +203,7 @@ export class App {
 
   /** この rAF で何フレーム進めるかを決めて、進める。 */
   private runFrames(dt: number, first: InputSnapshot): void {
-    const fastForward = first.held.has("fastForward");
+    const fastForward = first.held.has("fastForward") || this.mouseFastForward;
     const speed = fastForward ? Math.max(4, SPEEDS[this.speedIndex] * 4) : SPEEDS[this.speedIndex];
     const realtime = !fastForward && speed <= 1;
 
@@ -328,7 +333,7 @@ export class App {
   /** 今いる地点を覚える。ステートセーブに当たる操作。 */
   private rememberSpot(): void {
     if (!this.session.rec) return;
-    this.marked = { frame: this.session.frame, generation: this.session.rec.rewinds };
+    this.marked = { frame: this.session.frame, since: this.session.rec.truncMark() };
     this.toast(`${formatTime(this.marked.frame)} を覚えました（戻るときは ${this.keyFor("loadState")}）`, "ok");
   }
 
@@ -339,8 +344,11 @@ export class App {
       this.toast("まだどこも覚えていません", "warn");
       return;
     }
-    if (this.marked.frame > this.session.totalFrames) {
-      this.toast("覚えた地点は、やり直しで消えました", "warn");
+    // 覚えたあとに巻き戻して撮り直していると、同じフレーム番号でも中身が違う。
+    // 長さだけ見ても気づけないので、書き換え回数で判断する。
+    const rec = this.session.rec;
+    if (!rec.isStable(this.marked.frame, this.marked.since)) {
+      this.toast("覚えた地点は、やり直しで書き換わりました", "warn");
       this.marked = null;
       return;
     }
@@ -391,7 +399,7 @@ export class App {
     try {
       await this.audio.start();
       // 出口のレートに合わせる。ROM を読み込む前でないと作り直せない。
-      this.session.setSampleRate(this.audio.sampleRate);
+      await this.session.setSampleRate(this.audio.sampleRate);
       this.session.setSink(this.audio.push);
     } catch (err) {
       console.warn("音声を初期化できませんでした。無音で続けます:", err);
@@ -421,6 +429,7 @@ export class App {
       await this.session.loadRom(bytes, info, displayTitle(name));
       this.romInfo = info;
       this.savedAtFrames = -1;
+      this.recordingRevision = -1;
       this.input.reset();
       this.input.setWays(this.settings.ways[info.sha1] ?? 8);
       this.audio.clear();
@@ -449,6 +458,7 @@ export class App {
       const path = await this.bridge.saveFile("recording", suggestFileName(this.session.rec.meta()), bytes);
       if (path) {
         this.savedAtFrames = this.session.totalFrames;
+        this.recordingRevision = this.session.rec.revision;
         this.toast(`記録を保存しました: ${path}`, "ok");
       }
       return !!path;
@@ -461,10 +471,14 @@ export class App {
   }
 
 
-  /** 閉じたら失われる記録があるか。自動検証から見えるよう公開している。 */
+  /** 閉じたら失われる記録があるか。自動検証から見えるよう公開している。
+   *
+   *  フレーム数の比較では足りない。巻き戻して撮り直し、同じ長さまで戻ってきた
+   *  記録は「保存済み」に見えてしまい、撮り直した方が黙って消える。 */
   hasUnsavedWork(): boolean {
-    const n = this.session.totalFrames;
-    return n > 60 && n !== this.savedAtFrames;
+    const rec = this.session.rec;
+    if (!rec || rec.frameCount <= 60) return false;
+    return rec.revision !== this.recordingRevision;
   }
 
   /** 閉じる直前の確認。**記録は明示的に保存する決まりなので、ここで聞かないと
@@ -510,6 +524,7 @@ export class App {
       await this.session.adoptRecording(rec, resume ? "tail" : 0);
       this.session.mode = resume ? "record" : "playback";
       this.savedAtFrames = rec.frameCount;   // 読み込んだ内容はディスクにある
+      this.recordingRevision = rec.revision;
       this.audio.clear();
       this.setPaused(false);
       this.setSpeed(NORMAL_SPEED);
@@ -674,10 +689,12 @@ export class App {
     $("btn-turbo").onclick = () => this.cycleTurbo();
     $("btn-ways").onclick = () => this.toggleWays();
 
-    // 巻き戻し・早送りは「押している間」。マウスでも同じ感触にする。
-    // 16ms ごとに呼ばれるので、キーボードで押しているのと同じ量になる。
-    this.holdButton("btn-rewind", () => this.doRewind(16));
-    this.holdButton("btn-ff", () => { this.acc += FRAME_MS * 4; });
+    // 巻き戻し・早送りは「押している間」。
+    // **主ループの外で doRewind を呼んではいけない。** acc を共取りしてしまい、
+    // 戻しながら同時に進むので絵が前後に震え、戻る速さも半分になる。
+    // ボタンは旗を立てるだけにして、実際の処理はループ 1 か所に任せる。
+    this.holdFlag("btn-rewind", (on) => { this.mouseRewind = on; });
+    this.holdFlag("btn-ff", (on) => { this.mouseFastForward = on; });
 
     ($("speed") as HTMLSelectElement).onchange = (e) =>
       this.setSpeed(Number((e.target as HTMLSelectElement).value));
@@ -772,28 +789,35 @@ export class App {
   }
 
   private async adoptDropped(bytes: Uint8Array): Promise<void> {
+    // **busy を立てずに await してはいけない。** 待っている間も rAF ループは
+    // 回り続け、入れ替わったばかりの記録に対して frameCount 0 のまま step が
+    // 走り、truncate(0) で中身を消してしまう。
+    this.busy = true;
     try {
       const { rec } = await parseToRecorder(bytes);
       if (!this.romInfo) { this.toast("先に ROM を読み込んでください", "warn"); return; }
       await this.session.adoptRecording(rec, "tail");
+      this.savedAtFrames = rec.frameCount;
+      this.recordingRevision = this.session.rec?.revision ?? 0;
       this.toast("記録を読み込みました", "ok");
     } catch (err) {
       this.toast((err as Error).message, "warn");
+    } finally {
+      this.busy = false;
+      this.lastTs = 0;
     }
   }
 
-  private holdButton(id: string, tick: () => void): void {
+  /** 押している間だけ旗を立てるボタン。 */
+  private holdFlag(id: string, set: (on: boolean) => void): void {
     const el = $(id);
-    let timer = 0;
-    const start = (): void => {
-      tick();
-      timer = window.setInterval(tick, 16);
-    };
-    const stop = (): void => { clearInterval(timer); timer = 0; };
-    el.onpointerdown = start;
-    el.onpointerup = stop;
-    el.onpointerleave = stop;
-    el.onpointercancel = stop;
+    el.onpointerdown = () => { set(true); el.setPointerCapture?.(1); };
+    const off = (): void => set(false);
+    el.onpointerup = off;
+    el.onpointerleave = off;
+    el.onpointercancel = off;
+    window.addEventListener("pointerup", off);
+    window.addEventListener("blur", off);
   }
 
   private seekFromPointer(e: PointerEvent): void {
@@ -902,7 +926,10 @@ export class App {
     row.hidden = marks.length === 0;
     if (!rec || marks.length === 0) return;
 
-    const points = [0, ...marks.map((m) => m.frame), rec.frameCount];
+    // 目印が先頭や末尾に重なると長さ 0 の区間ができる。M を押した瞬間は
+    // 常に末尾なので、これは普通に起きる。
+    const points = [...new Set([0, ...marks.map((m) => m.frame), rec.frameCount])]
+      .sort((a, b) => a - b);
     for (let i = 0; i < points.length - 1; i++) {
       const from = points[i];
       const to = points[i + 1];

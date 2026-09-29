@@ -107,8 +107,10 @@ export class AudioOut {
     this.ctx = ctx;
     this.node = node;
     this.gain = gain;
-    this.started = true;
+    // resume が落ちることがある。started を先に立てると「音は出ているはず」
+    // として扱われ、サンプルレートの突き合わせも飛ばされる。最後に立てる。
     if (ctx.state === "suspended") await ctx.resume();
+    this.started = true;
   }
 
   /** エミュレーターのサンプルを受ける。`Session.setSink` に渡す。 */

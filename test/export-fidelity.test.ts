@@ -72,7 +72,17 @@ test("書き出した動画の各フレームが、記録どおりの絵と順�
   );
 
   const decoded = await decodeFrames(out, SCREEN_W, SCREEN_H);
-  assert.equal(decoded.length, FRAMES, "フレーム数が一致");
+
+  // NES は 60.0978fps なので、60fps の動画では枚数がわずかに減り、
+  // 動画の k 枚目がエミュレートの何フレーム目かもずれる。対応表を作る。
+  const NES_FPS = 60.0978;
+  const source: number[] = [];   // 動画の k 枚目 -> エミュレートのフレーム番号
+  let emitted = 0;
+  for (let i = 0; i < FRAMES; i++) {
+    const want = Math.floor(((i + 1) * 60) / NES_FPS);
+    while (emitted < want) { source.push(i); emitted++; }
+  }
+  assert.equal(decoded.length, source.length, "動画の枚数が計算どおり");
 
   // エミュレーターをもう一度回して、同じ位置の絵を作る。
   const emu = new Emu(48000);
@@ -92,18 +102,20 @@ test("書き出した動画の各フレームが、記録どおりの絵と順�
     // ずらした先がどれも十分違う地点だけを選ぶ。1 つでも同じ絵だと、
     // 「自分の方が近い」が成り立ちようがない。
     const worst = Math.min(...OFFSETS.map((d) => meanAbsDiff(reference[i], toRgb(reference[i + d]))));
-    if (worst > 4) moving.push(i);
+    if (worst > 4 && source.includes(i)) moving.push(i);
   }
   assert.ok(moving.length >= 3, `動きのある地点が見つかる (${moving.length} 件)`);
 
   // 対角 (同じ番号どうし) が、前後にずらした組み合わせより必ず近いこと。
   // これが成り立てば、内容も順序も合っている。
   for (const i of moving) {
-    const own = meanAbsDiff(reference[i], decoded[i]);
+    const k = source.indexOf(i);
+    assert.ok(k >= 0, `frame ${i} が動画に出ている`);
+    const own = meanAbsDiff(reference[i], decoded[k]);
     assert.ok(own < 8, `frame ${i}: 自分との差 ${own.toFixed(2)} が小さい (H.264 の劣化分)`);
     for (const d of OFFSETS) {
-      const j = i + d;
-      if (j < 0 || j >= FRAMES) continue;
+      const j = k + d;
+      if (j < 0 || j >= decoded.length) continue;
       const other = meanAbsDiff(reference[i], decoded[j]);
       assert.ok(own < other, `frame ${i}: 自分 ${own.toFixed(2)} < ${d} ずらし ${other.toFixed(2)}`);
     }

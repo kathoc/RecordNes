@@ -92,10 +92,12 @@ export class Keyboard {
       if (cmd) this.pending.push(cmd);
     };
     const onUp = (ev: Event): void => {
-      if (typing(ev)) return;
       const e = ev as KeyboardEvent;
+      // **離したことは、文字入力中でも必ず受ける。** ここで弾くと、押してから
+      // 入力欄へ焦点が移った場合にキーが押されたままになる。Backspace なら
+      // 巻き戻しが止まらなくなる。
       this.down.delete(e.code);
-      if (this.known(e.code)) e.preventDefault();
+      if (!typing(ev) && this.known(e.code)) e.preventDefault();
     };
     const onBlur = (): void => this.down.clear();
     target.addEventListener("keydown", onDown);

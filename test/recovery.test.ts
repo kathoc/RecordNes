@@ -39,3 +39,38 @@ test("捨てたキーフレームは二度と使われない", async (t) => {
   assert.ok(s.seek(31), "今度は復元に成功する");
   assert.equal(s.pendingRecovery, null, "もう止まらない");
 });
+
+test("書き出しの途中で状態が壊れていたら、黙って固まった動画を出さない", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const { Exporter } = await import("../src/export/exporter.ts");
+  const { NodeBridge } = await import("./node-bridge.ts");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const { Recorder } = await import("../src/record/recorder.ts");
+
+  const s = await newSession(SMB, 0);
+  const script = scriptedInput(41);
+  for (let f = 0; f < 200; f++) s.step(script(f));
+
+  // 復元できないフレーム 30 のキーフレームだけを持つ記録を組み立てる。
+  // 保存したファイルには 300 フレームおきのキーフレームしか入らないので、
+  // 本来なら滅多に掴まないが、掴んだときに黙って進んではいけない。
+  const bad = s.rec!.nearestState(30)!;
+  assert.equal(bad.frame, 30);
+  const rec = Recorder.restore(
+    s.rec!.meta(), s.rec!.inputBytes(), s.rec!.events, [bad], null,
+  );
+  const out = join(mkdtempSync(join(tmpdir(), "recordnes-jam-")), "jam.mp4");
+  await assert.rejects(
+    () => new Exporter().run(
+      new NodeBridge(out), s.romData()!, rec,
+      { from: 31, to: 120 },
+      { scale: 1, fps: 60, crf: 30, audio: false, overlayInput: false },
+      () => {}, "jam.mp4",
+    ),
+    /復元できませんでした/,
+    "復元できない地点から始めたら、成功として返さない",
+  );
+});

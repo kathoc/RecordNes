@@ -40,6 +40,40 @@ test("音声の引き伸ばしは、要求された本数をきっかり返す",
   assert.equal(out[0], Math.round(0.5 * 32767));
 });
 
+test("フレームレートを変えても、動画の長さが実時間と一致する", async (t) => {
+  if (!haveRom(SMB)) return t.skip("ROM が無い");
+  const dir = mkdtempSync(join(tmpdir(), "recordnes-fps-"));
+  const s = await newSession(SMB, 0);
+  const script = scriptedInput(31);
+  const FRAMES = 361; // NES の 6.005 秒ぶん
+  for (let f = 0; f < FRAMES; f++) s.step(script(f));
+  const realSeconds = FRAMES / 60.0978;
+
+  for (const fps of [60, 59.94, 30]) {
+    const out = join(dir, `fps-${fps}.mp4`);
+    await new Exporter().run(
+      new NodeBridge(out), s.romData()!, s.rec!,
+      { from: 0, to: FRAMES },
+      { scale: 1, fps, crf: 26, audio: true, overlayInput: false },
+      () => {}, "fps.mp4",
+    );
+    const info = await ffprobe(out);
+    const streams = info.streams as Record<string, unknown>[];
+    const video = streams.find((x) => x.codec_type === "video")!;
+    const audio = streams.find((x) => x.codec_type === "audio")!;
+    const dur = Number((info.format as Record<string, unknown>).duration);
+    assert.ok(
+      Math.abs(dur - realSeconds) < 0.08,
+      `${fps}fps: 長さ ${dur.toFixed(3)} 秒（実時間 ${realSeconds.toFixed(3)} 秒）`,
+    );
+    const expectedFrames = Math.floor((FRAMES * fps) / 60.0978);
+    const actual = Number(video.nb_frames ?? expectedFrames);
+    assert.ok(Math.abs(actual - expectedFrames) <= 1, `${fps}fps: 枚数 ${actual}（期待 ${expectedFrames}）`);
+    const adur = Number(audio.duration ?? dur);
+    assert.ok(Math.abs(adur - dur) < 0.08, `${fps}fps: 映像 ${dur} 秒 と 音声 ${adur} 秒 のずれ`);
+  }
+});
+
 test("記録から mp4 を書き出し、長さ・解像度・音声が仕様どおりになる", async (t) => {
   if (!haveRom(SMB)) return t.skip("ROM が無い");
   const dir = mkdtempSync(join(tmpdir(), "recordnes-"));
@@ -69,15 +103,17 @@ test("記録から mp4 を書き出し、長さ・解像度・音声が仕様ど
   assert.equal(video.width, SCREEN_W * 2);
   assert.equal(video.height, SCREEN_H * 2);
   assert.equal(video.codec_name, "h264");
-  assert.equal(video.nb_frames ? Number(video.nb_frames) : FRAMES, FRAMES, "フレーム数が一致");
+  // NES は 60.0978fps なので、60fps の動画では 300 エミュレートフレームが 299 枚になる。
+  const expectedFrames = Math.floor((FRAMES * 60) / 60.0978);
+  assert.equal(Number(video.nb_frames ?? expectedFrames), expectedFrames, "動画の枚数");
   assert.equal(video.r_frame_rate, "60/1");
   assert.ok(audio, "音声ストリームがある");
   assert.equal(audio.codec_name, "aac");
 
   // 映像と音声の長さが揃っていること。ここがずれると動画として使えない。
   const dur = Number((info.format as Record<string, unknown>).duration);
-  const expected = FRAMES / 60;
-  assert.ok(Math.abs(dur - expected) < 0.06, `長さ ${dur} 秒 (期待 ${expected} 秒)`);
+  const expected = FRAMES / 60.0978; // 実時間
+  assert.ok(Math.abs(dur - expected) < 0.06, `長さ ${dur} 秒 (実時間 ${expected} 秒)`);
   const vdur = Number(video.duration ?? dur);
   const adur = Number(audio.duration ?? dur);
   assert.ok(Math.abs(vdur - adur) < 0.06, `映像 ${vdur} 秒 と 音声 ${adur} 秒 のずれ`);

@@ -79,12 +79,25 @@ export class Session {
    *  合わせないと、エミュレーターが毎秒 48000 本作るのに出口は 44100 本しか
    *  食べないので、音程が約 9% 上がる。動的レート調整が帳尻を合わせてしまうため、
    *  「少し変だが鳴ってはいる」状態になって気づきにくい。 */
-  setSampleRate(rate: number): void {
+  async setSampleRate(rate: number): Promise<void> {
     if (!rate || rate === this.sampleRate) return;
     this.sampleRate = rate;
+    const at = this.emu.frameCount;
     this.emu = new Emu(rate);
     this.ahead = null;
     this.emu.setSink(this.sink);
+    // 作り直した実体には ROM が入っていない。読み込み済みなら積み直して、
+    // 同じ位置へ戻す。ここを忘れると loaded が false のまま、黒い画面で
+    // 何も進まなくなる（エラーも出ないので原因が分からない）。
+    if (this.romBytes) {
+      await this.emu.load(this.romBytes);
+      if (this.runAhead > 0) await this.ensureAhead();
+      if (this.rec) {
+        if (this.rec.originState) this.emu.loadState(this.rec.originState);
+        this.emu.frameCount = 0;
+        if (!this.seek(at)) await this.recover();
+      }
+    }
   }
 
   get frame(): number {
@@ -139,6 +152,10 @@ export class Session {
   async adoptRecording(rec: Recorder, atFrame: number | "tail" = "tail"): Promise<void> {
     if (!this.romBytes) throw new Error("先に ROM を読み込んでください");
     this.rec = rec;
+    // 前の記録で掴んでいた位置を持ち越さない。持ち越すと、立て直しのときに
+    // 無関係なフレーム番号のキーフレームを捨ててしまう。
+    this.lastRestoredFrame = -1;
+    this.pendingRecovery = null;
     await this.emu.load(this.romBytes);
     if (this.runAhead > 0) await this.ensureAhead();
     if (rec.originState) {

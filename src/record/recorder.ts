@@ -32,6 +32,14 @@ export class Recorder {
   private buf: Uint8Array;
   private n = 0;
 
+  /** 記録が書き換わった回数。書き足しも切り詰めも数える。
+   *  「保存したときと同じか」を長さで判断すると、巻き戻して同じ長さまで
+   *  撮り直した記録を保存済みと誤認する。 */
+  revision = 0;
+  /** 切り詰めた地点の履歴。覚えた地点がまだ生きているかの判定に使う。
+   *  巻き戻しは何度も起きないので、全部持っても増えすぎない。 */
+  private truncPoints: number[] = [];
+
   /** frame -> state。疎キーフレームは消さない。 */
   private sparse = new Map<number, Uint8Array>();
   /** 密リング。frame -> state。DENSE_FRAMES を超えたら古いものから捨てる。 */
@@ -58,6 +66,7 @@ export class Recorder {
     this.buf[this.n * 2] = p1 & 0xff;
     this.buf[this.n * 2 + 1] = p2 & 0xff;
     this.n++;
+    this.revision++;
   }
 
   inputAt(frame: number): [number, number] {
@@ -96,6 +105,8 @@ export class Recorder {
   /** タイムラインを frame まで縮める。巻き戻しと引き継ぎの唯一の入口。 */
   truncate(frame: number, countAsRewind = true): void {
     if (frame >= this.n) return;
+    this.revision++;
+    this.truncPoints.push(frame);
     if (countAsRewind) {
       this.rewinds++;
       this.discardedFrames += this.n - frame;
@@ -116,6 +127,21 @@ export class Recorder {
 
   /** 捨てた地点。同じ場所を何度も掴まないために覚えておく */
   private poisoned = new Set<number>();
+
+  /** 今までに切り詰めた回数。覚えた地点と一緒に控えておく。 */
+  truncMark(): number {
+    return this.truncPoints.length;
+  }
+
+  /** `since` の時点から見て、`frame` の中身が書き換わっていないか。
+   *  それより後ろだけを切り詰めていたなら、その地点はまだ生きている。 */
+  isStable(frame: number, since: number): boolean {
+    if (frame > this.n) return false;
+    for (let i = since; i < this.truncPoints.length; i++) {
+      if (this.truncPoints[i] < frame) return false;
+    }
+    return true;
+  }
 
   addEvent(type: TimelineEvent["type"], frame: number, label?: string): void {
     this.events.push({ frame, type, label });
@@ -165,6 +191,7 @@ export class Recorder {
     r.players = meta.players;
     r.rewinds = meta.rewinds;
     r.discardedFrames = meta.discardedFrames;
+    r.revision = 0;
     r.originState = originState;
     r.events = events.slice();
     const need = meta.frameCount * 2;

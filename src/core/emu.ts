@@ -13,6 +13,10 @@ import { NES } from "@nesjs/core";
 export const SCREEN_W = 256;
 export const SCREEN_H = 240;
 
+/** NES が 1 秒間に出すフレーム数。音声サンプル数から実測した値
+ *  (tools/audio-rate-probe.mjs)。動画でよく使う 60 とも 59.94 とも一致しない。 */
+export const NES_FPS = 60.0978;
+
 /** 入力 1 バイトのビット位置。NESControllerButton と同じ順。 */
 export const BTN = {
   A: 1 << 0,
