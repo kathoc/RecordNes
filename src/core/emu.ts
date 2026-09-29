@@ -73,6 +73,7 @@ export class Emu {
     this.frameCount = 0;
     this.pixels.fill(0);
     this.setInputs(0, 0);
+    this.loaded = true;
   }
 
   /** リセット。フレーム数は 0 に戻さない — 記録のタイムラインは切れずに続く。
