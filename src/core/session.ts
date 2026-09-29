@@ -85,9 +85,17 @@ export class Session {
     this.sink = sink;
   }
 
-  /** 画面に出すべきピクセル。ラン・アヘッド中は「N フレーム先」の絵。 */
+  /** 先読み側の絵が今のフレームのものか。巻き戻しや復元の直後は古い。 */
+  private aheadFresh = false;
+
+  /** 画面に出すべきピクセル。ラン・アヘッド中は「N フレーム先」の絵。
+   *
+   *  巻き戻しや位置移動のあとは先読みが追いついていないので、記録用の絵を出す。
+   *  ここを見ずに常に先読み側を返すと、**巻き戻し中に画面が固まる**。 */
   get pixels(): Uint8Array {
-    return this.runAhead > 0 && this.ahead?.loaded ? this.ahead.pixels : this.emu.pixels;
+    return this.runAhead > 0 && this.aheadFresh && this.ahead?.loaded
+      ? this.ahead.pixels
+      : this.emu.pixels;
   }
 
   private async ensureAhead(): Promise<void> {
@@ -160,6 +168,7 @@ export class Session {
     // 記録の正本は入力列なので、電源投入から流し直せば必ず戻れる。
     if (consumeJam()) {
       this.pendingRecovery = f;
+      this.aheadFresh = false;
       return;
     }
 
@@ -182,6 +191,7 @@ export class Session {
       const r0 = now();
       this.ahead.loadState(state);
       for (let i = 0; i < this.runAhead; i++) this.ahead.step(p1, p2);
+      this.aheadFresh = true;
       // 先読み側が止まっても、記録用は無事。ここで旗を下ろして巻き込まない。
       consumeJam();
       raMs = now() - r0;
@@ -214,6 +224,7 @@ export class Session {
     this.emu.loadState(k.state);
     this.emu.frameCount = k.frame;
     this.lastRestoredFrame = k.frame;
+    this.aheadFresh = false;
     this.replayTo(goal);
     this.snapshotHere();
     return true;
@@ -222,6 +233,7 @@ export class Session {
   /** 今の位置から goal まで、記録された入力で無音のまま進める。 */
   private replayTo(goal: number): void {
     if (!this.rec) return;
+    this.aheadFresh = false;
     this.emu.setSink(null);
     while (this.emu.frameCount < goal) {
       const f = this.emu.frameCount;
@@ -245,6 +257,7 @@ export class Session {
       await this.emu.load(this.romBytes);
       if (this.rec.originState) this.emu.loadState(this.rec.originState);
       this.emu.frameCount = 0;
+      this.aheadFresh = false;
       clearJam();
       this.replayTo(goal);
       this.snapshotHere();

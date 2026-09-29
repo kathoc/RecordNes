@@ -101,6 +101,13 @@
         段数を上げるほど手応えが早くなりますが、1 フレームあたりの計算量が増えます。
         <b>記録される内容は段数によって変わりません。</b></p>
         <div id="runahead-cost" class="note mono"></div>
+        <label class="row"><input id="set-uncap" type="checkbox" />
+          <span><b>フレーム制限を外す（最低遅延）</b><br />
+          <small>画面の更新間隔を待たずに計算するので、押してから絵が変わるまでが最短になります。
+          そのぶん CPU を使い続けます。<b>次回の起動から有効</b>になります。</small></span></label>
+        <label class="row"><input id="set-perf" type="checkbox" />
+          <span><b>計測値を表示する</b><br />
+          <small>1 フレームの計算時間、入力が届くまでの時間、音声の遅延を画面下に出します。</small></span></label>
       </section>
       <section>
         <h3>連射</h3>

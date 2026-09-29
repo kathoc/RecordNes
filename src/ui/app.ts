@@ -40,6 +40,8 @@ interface Settings {
   turboRate: number;
   turboMode: "off" | "hold" | "toggle";
   rewindSpeed: number;
+  uncapFrameRate: boolean;
+  showPerf: boolean;
   volume: number;
   ways: Record<string, Ways>;
   exportSettings: ExportSettings;
@@ -52,6 +54,8 @@ const DEFAULT_SETTINGS: Settings = {
   turboRate: 15,
   turboMode: "off",
   rewindSpeed: 2,
+  uncapFrameRate: false,
+  showPerf: false,
   volume: 0.7,
   ways: {},
   exportSettings: { ...DEFAULT_EXPORT },
@@ -78,6 +82,12 @@ export class App {
   private acc = 0;
   private lastTs = 0;
   private stepOnce = 0;
+  /** 巻き戻し直後の案内を出すか */
+  private rewindHint = false;
+  /** 画面を描き直す必要があるか。vsync 制限を外すと rAF が数百 Hz で回るので、
+   *  何も変わっていないフレームまで描くと CPU を無駄に食う。 */
+  private dirty = true;
+  private lastStatusAt = 0;
   private busy = false;
   /** 直近の rAF で使った実時間の内訳。計測表示用 */
   private perf = { emu: 0, raf: 0, latency: 0 };
@@ -156,16 +166,24 @@ export class App {
     const t0 = performance.now();
     if (this.session.rec && this.romInfo) {
       if (snap.held.has("rewind")) {
-        this.doRewind();
+        this.doRewind(dt);
       } else {
         this.runFrames(dt, snap);
       }
     }
     this.perf.emu = performance.now() - t0;
 
-    this.render();
-    this.drawTimeline();
-    this.updateStatus();
+    // 進んでいないフレームまで描き直さない。
+    if (this.dirty) {
+      this.render();
+      this.dirty = false;
+    }
+    // 文字とタイムラインは目で追える速さで十分。1 秒に 20 回まで。
+    if (ts - this.lastStatusAt > 50) {
+      this.lastStatusAt = ts;
+      this.drawTimeline();
+      this.updateStatus();
+    }
   };
 
   /** この rAF で何フレーム進めるかを決めて、進める。 */
@@ -197,7 +215,11 @@ export class App {
       if (i > 0) this.applyEdges(snap.edges);
       const wasPlayback = this.session.mode === "playback";
       this.session.step(snap.pads);
-      if (wasPlayback && this.session.mode === "record") this.toast("ここから自分のプレイを記録します");
+      this.dirty = true;
+      if (wasPlayback && this.session.mode === "record") {
+        this.rewindHint = false;
+        this.toast("ここから自分のプレイを記録します");
+      }
       if (wasPlayback && this.session.atTail) {
         this.session.mode = "record";
         this.toast("記録の末尾に着きました。ここから続きを記録します");
@@ -208,11 +230,28 @@ export class App {
     else this.audio.drop();
   }
 
-  private doRewind(): void {
-    const n = Math.max(1, Math.round(this.settings.rewindSpeed * Math.max(1, SPEEDS[this.speedIndex])));
+  /** 巻き戻し。**戻す量は実時間から決める。**
+   *
+   *  rAF の回数で数えると、vsync 制限を外した環境で桁違いに速く戻ってしまう。
+   *  実測: Xvfb 上で 1.2 秒押しただけで 374 フレームから 6 フレームまで戻った。 */
+  private doRewind(dt: number): void {
+    const speed = this.settings.rewindSpeed * Math.max(1, SPEEDS[this.speedIndex]);
+    this.acc += dt * speed;
+    const n = Math.floor(this.acc / FRAME_MS);
+    if (n <= 0) return;
+    this.acc -= n * FRAME_MS;
     this.audio.drop();
-    if (!this.session.rewind(n) && this.session.pendingRecovery === null) this.toast("これ以上は戻れません");
-    this.acc = 0;
+
+    // 巻き戻したら再生モードへ移る。こうしておくと、記録はまだ縮まない。
+    // ボタンに触れた瞬間に引き継ぎが起きて、そこでタイムラインがつながる。
+    if (this.session.mode === "record") {
+      this.session.mode = "playback";
+      this.rewindHint = true;
+    }
+    if (!this.session.rewind(Math.min(n, 240)) && this.session.pendingRecovery === null) {
+      this.toast("これ以上は戻れません");
+    }
+    this.dirty = true;
   }
 
   // ---------------------------------------------------------------- 操作
@@ -243,6 +282,7 @@ export class App {
   private setPaused(v: boolean): void {
     this.paused = v;
     this.acc = 0;
+    this.dirty = true;
     $("btn-pause").textContent = v ? "▶" : "⏸";
     $("btn-pause").classList.toggle("on", v);
     if (v) this.audio.drop();
@@ -459,6 +499,9 @@ export class App {
       parts.push(`連射 ${this.input.turbo.state.mode === "hold" ? "H" : "T"}${l ? ":" + l : ""}`);
     }
     if (this.input.ways === 4) parts.push("4-WAY");
+    if (this.rewindHint && this.session.mode === "playback") {
+      parts.push("ボタンを押すとここから記録し直します");
+    }
     $("osd").textContent = parts.join("   ");
 
     const hint = $("combo-hint");
@@ -490,7 +533,7 @@ export class App {
       : "0 フレーム";
     ($("btn-takeover") as HTMLElement).hidden = this.session.mode !== "playback";
 
-    if (new URLSearchParams(location.search).has("perf")) {
+    if (this.settings.showPerf || new URLSearchParams(location.search).has("perf")) {
       $("perf").textContent =
         `rAF ${this.perf.raf.toFixed(1)}ms  emu ${this.perf.emu.toFixed(2)}ms  ` +
         `RA ${this.session.lastStats.runAheadMs.toFixed(2)}ms  入力 ${this.perf.latency.toFixed(1)}ms  ` +
@@ -559,7 +602,8 @@ export class App {
     $("btn-ways").onclick = () => this.toggleWays();
 
     // 巻き戻し・早送りは「押している間」。マウスでも同じ感触にする。
-    this.holdButton("btn-rewind", () => this.doRewind());
+    // 16ms ごとに呼ばれるので、キーボードで押しているのと同じ量になる。
+    this.holdButton("btn-rewind", () => this.doRewind(16));
     this.holdButton("btn-ff", () => { this.acc += FRAME_MS * 4; });
 
     ($("speed") as HTMLSelectElement).onchange = (e) =>
@@ -604,6 +648,17 @@ export class App {
       this.saveSettings();
     };
     $("turbo-rate-label").textContent = `${this.settings.turboRate} Hz`;
+
+    const uncap = $("set-uncap") as HTMLInputElement;
+    uncap.checked = this.settings.uncapFrameRate;
+    uncap.onchange = () => {
+      this.settings.uncapFrameRate = uncap.checked;
+      this.saveSettings();
+      this.toast("次回の起動から変わります");
+    };
+    const perf = $("set-perf") as HTMLInputElement;
+    perf.checked = this.settings.showPerf;
+    perf.onchange = () => { this.settings.showPerf = perf.checked; this.saveSettings(); };
 
     const rs = $("set-rewind-speed") as HTMLSelectElement;
     rs.value = String(this.settings.rewindSpeed);

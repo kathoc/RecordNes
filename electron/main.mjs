@@ -9,7 +9,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -19,8 +19,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const isDev = !app.isPackaged && process.env.RECORDNES_DEV === "1";
 
-app.commandLine.appendSwitch("disable-gpu-vsync");
-app.commandLine.appendSwitch("disable-frame-rate-limit");
+/** 自動検証。`RECORDNES_SELFTEST=<script.js>` を付けて起動すると、そのスクリプトを
+ *  画面の中で走らせ、結果を `RECORDNES_SELFTEST_OUT` へ書いて終了する。
+ *  実際のアプリを実際のループで動かしたまま確かめるための唯一の入口。 */
+const selfTest = process.env.RECORDNES_SELFTEST ?? "";
+
+/** フレーム制限の解除。
+ *
+ *  外すと rAF が画面の更新間隔に縛られず、入力を採ってからエミュレートするまでが
+ *  最短になる。代わりに rAF が数百 Hz で回って CPU を食う。既定は切っておき、
+ *  遅延を最優先したい人だけが入れる。切り替えは起動時にしか効かない。 */
+function readSettingsSync() {
+  try {
+    return JSON.parse(readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+if (readSettingsSync().uncapFrameRate) {
+  app.commandLine.appendSwitch("disable-gpu-vsync");
+  app.commandLine.appendSwitch("disable-frame-rate-limit");
+}
 
 let win = null;
 
@@ -56,6 +75,7 @@ async function createWindow() {
   });
 
   win.webContents.on("did-finish-load", async () => {
+    if (selfTest) void runSelfTest();
     for (const p of bootFiles()) {
       try {
         const buf = await readFile(p);
@@ -74,6 +94,29 @@ async function createWindow() {
   } else {
     await win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
+}
+
+/** 画面の写真を撮る。自動検証から呼ぶ。 */
+ipcMain.handle("shot", async (_e, name) => {
+  const img = await win.webContents.capturePage();
+  const out = path.join(process.env.RECORDNES_SHOT_DIR ?? app.getPath("temp"), `${name}.png`);
+  await writeFile(out, img.toPNG());
+  return out;
+});
+
+async function runSelfTest() {
+  const script = await readFile(selfTest, "utf8");
+  let result;
+  try {
+    result = await win.webContents.executeJavaScript(`(async () => { ${script} })()`, true);
+  } catch (err) {
+    result = { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+  const out = process.env.RECORDNES_SELFTEST_OUT;
+  const text = JSON.stringify(result, null, 2);
+  if (out) await writeFile(out, text);
+  console.log(`[selftest] ${text}`);
+  app.quit();
 }
 
 app.whenReady().then(createWindow);

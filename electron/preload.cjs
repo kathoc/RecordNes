@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("recordnes", {
   videoFinish: (id) => ipcRenderer.invoke("video:finish", id),
   videoCancel: (id) => ipcRenderer.invoke("video:cancel", id),
   videoBackend: () => ipcRenderer.invoke("video:backend"),
+  shot: (name) => ipcRenderer.invoke("shot", name),
   onBootFile: (cb) => {
     bootHandler = cb;
     while (bootQueue.length) cb(bootQueue.shift());
