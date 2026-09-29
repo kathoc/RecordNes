@@ -16,5 +16,5 @@ RECORDNES_SELFTEST="$ROOT/tools/packaged-check.js" \
 RECORDNES_SELFTEST_OUT="$ROOT/tmp/packaged-check.json" \
 RECORDNES_VIDEO_OUT="$ROOT/tmp/packaged-export.mp4" \
 RECORDNES_SHOT_DIR="$ROOT/tmp" \
-  "$APP" --appimage-extract-and-run --no-sandbox "$ROM" > "$ROOT/tmp/packaged-check.log" 2>&1 || true
+  "$APP" --appimage-extract-and-run --no-sandbox --recordnes-test-mode "$ROM" > "$ROOT/tmp/packaged-check.log" 2>&1 || true
 cat "$ROOT/tmp/packaged-check.json" 2>/dev/null || echo "(結果ファイルがありません)"

@@ -15,7 +15,13 @@ export const DENSE_FRAMES = 900;
 /** 疎キーフレーム: この間隔でセッション全体に残す。60fps で 5 秒。 */
 export const SPARSE_INTERVAL = 300;
 
+/** 記録を見分けるための通し番号。同じ中身でも作り直せば別物になる。 */
+let nextId = 1;
+
 export class Recorder {
+  /** この記録の識別子。実体そのものを覚えておくと、保存済みの印が古い記録を
+   *  掴んだままキーフレーム(最大 900 枚)を解放させない。番号だけ持つ。 */
+  readonly id = nextId++;
   readonly rom: RomInfo;
   title: string;
   players: 1 | 2 = 1;

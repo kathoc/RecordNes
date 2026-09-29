@@ -24,6 +24,13 @@ const isDev = !app.isPackaged && process.env.RECORDNES_DEV === "1";
  *  実際のアプリを実際のループで動かしたまま確かめるための唯一の入口。 */
 const selfTest = process.env.RECORDNES_SELFTEST ?? "";
 
+/** 自動検証のための迂回（保存ダイアログを出さない等）を許すかどうか。
+ *
+ *  環境変数だけを条件にすると、たまたま同じ名前の変数が入っている環境で
+ *  配布物がダイアログを出さずに上書きしてしまう。**明示の引数を要る**ことに
+ *  して、普通に起動したアプリでは決して働かないようにする。 */
+const testMode = process.argv.includes("--recordnes-test-mode");
+
 /** フレーム制限の解除。
  *
  *  外すと rAF が画面の更新間隔に縛られず、入力を採ってからエミュレートするまでが
@@ -243,8 +250,9 @@ ipcMain.handle("file:open", async (_e, kind) => {
 
 ipcMain.handle("file:save", async (_e, kind, suggestedName, bytes) => {
   // 自動検証では保存ダイアログを出せない。出力先を環境変数で渡せるようにする。
-  // ここを通しておかないと、保存の経路そのものを自動で確かめられない。
-  const forced = process.env.RECORDNES_SAVE_DIR;
+  // --recordnes-test-mode を付けたときだけ効く。付けずに起動したアプリでは
+  // 決して働かないので、既存のファイルを黙って上書きすることはない。
+  const forced = testMode ? process.env.RECORDNES_SAVE_DIR : "";
   if (forced) {
     const p = path.join(forced, suggestedName);
     await writeFile(p, Buffer.from(bytes));
@@ -303,7 +311,7 @@ const jobs = new Map();
 
 ipcMain.handle("video:start", async (_e, opts) => {
   // 自動検証では保存ダイアログを出せない。出力先を環境変数で渡せるようにする。
-  let filePath = process.env.RECORDNES_VIDEO_OUT ?? "";
+  let filePath = (testMode ? process.env.RECORDNES_VIDEO_OUT : "") ?? "";
   if (!filePath) {
     const r = await dialog.showSaveDialog(win, {
       defaultPath: opts.path || "recordnes.mp4",

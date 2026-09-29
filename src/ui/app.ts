@@ -90,11 +90,11 @@ export class App {
   private mouseFastForward = false;
   /** 最後に保存したときの記録と、そのときの書き換え回数。
    *
-   *  **記録の実体そのものを覚える。** 数値だけを比べると、記録を作り直した
+   *  **どの記録かまで覚える。** 書き換え回数だけを比べると、記録を作り直した
    *  (リセット、別の ROM、ステートからの開始) ときに番号を戻し忘れるだけで
    *  「保存済み」に見えてしまう。戻し忘れは実際に 3 回やった。
-   *  実体が違えば未保存、と決めておけば、戻し忘れようがない。 */
-  private savedMark: { rec: Recorder; revision: number } | null = null;
+   *  別の記録なら未保存、と決めておけば、戻し忘れようがない。 */
+  private savedMark: { id: number; revision: number } | null = null;
   /** 画面を描き直す必要があるか。vsync 制限を外すと rAF が数百 Hz で回るので、
    *  何も変わっていないフレームまで描くと CPU を無駄に食う。 */
   private dirty = true;
@@ -459,7 +459,7 @@ export class App {
       const bytes = await serialize(this.session.rec, this.session.emu.sram());
       const path = await this.bridge.saveFile("recording", suggestFileName(this.session.rec.meta()), bytes);
       if (path) {
-        this.savedMark = { rec: this.session.rec, revision: this.session.rec.revision };
+        this.savedMark = { id: this.session.rec.id, revision: this.session.rec.revision };
         this.toast(`記録を保存しました: ${path}`, "ok");
       }
       return !!path;
@@ -480,7 +480,7 @@ export class App {
     const rec = this.session.rec;
     if (!rec || rec.frameCount <= 60) return false;
     if (!this.savedMark) return true;
-    return this.savedMark.rec !== rec || this.savedMark.revision !== rec.revision;
+    return this.savedMark.id !== rec.id || this.savedMark.revision !== rec.revision;
   }
 
   /** 閉じる前に main から呼ばれる。保存できたら true。 */
@@ -516,7 +516,7 @@ export class App {
       );
       await this.session.adoptRecording(rec, resume ? "tail" : 0);
       this.session.mode = resume ? "record" : "playback";
-      this.savedMark = { rec, revision: rec.revision };
+      this.savedMark = { id: rec.id, revision: rec.revision };
       this.marked = null;
       this.audio.clear();
       this.setPaused(false);
@@ -795,7 +795,7 @@ export class App {
       if (!this.romInfo) { this.toast("先に ROM を読み込んでください", "warn"); return; }
       await this.session.adoptRecording(rec, "tail");
       const adopted = this.session.rec;
-      this.savedMark = adopted ? { rec: adopted, revision: adopted.revision } : null;
+      this.savedMark = adopted ? { id: adopted.id, revision: adopted.revision } : null;
       this.marked = null;
       this.toast("記録を読み込みました", "ok");
     } catch (err) {

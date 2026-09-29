@@ -162,10 +162,11 @@ document.getElementById("set-reset-keeps").dispatchEvent(new Event("change"));
 const cd = document.getElementById("set-confirm-discard");
 if (cd.checked) { cd.checked = false; cd.dispatchEvent(new Event("change")); }
 app.setPaused(false);
+const recBefore = s.rec;
 window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyR", ctrlKey: true, bubbles: true }));
 await sleep(2000);                   // 60 フレームより長く録り直す
-check("リセットで記録が作り直される", s.totalFrames > 60 && s.rec.revision < 400, {
-  frames: s.totalFrames, revision: s.rec.revision,
+check("リセットで記録が作り直される", s.rec !== recBefore && s.totalFrames > 60, {
+  frames: s.totalFrames, 別物か: s.rec !== recBefore,
 });
 check("リセット後に録り直したら未保存に戻る", app.hasUnsavedWork() === true, {
   revision: s.rec.revision,
@@ -176,12 +177,16 @@ check("リセット後に録り直したら未保存に戻る", app.hasUnsavedWo
 // ぶつかる。ぶつかった瞬間だけ「保存済み」に見える作りだと、そこで記録が消える。
 // 自然に待つと何分もかかるので、ここでは番号を直接合わせて確かめる。
 const savedRev = (() => {
-  // 保存したときの番号を取り出す（外からは見えないので、同じ値を作って試す）
-  for (let r = 0; r < 200000; r++) {
-    s.rec.revision = r;
-    if (!app.hasUnsavedWork()) return r;
+  const keep = s.rec.revision;
+  try {
+    for (let r = 0; r < 200000; r++) {
+      s.rec.revision = r;
+      if (!app.hasUnsavedWork()) return r;
+    }
+    return -1;
+  } finally {
+    s.rec.revision = keep;   // 探索の副作用を残さない
   }
-  return -1;
 })();
 check("記録を作り直したら、番号が一致しても未保存のまま", savedRev === -1, {
   ぶつかった番号: savedRev,
