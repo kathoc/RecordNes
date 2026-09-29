@@ -14,6 +14,7 @@ DISPLAY="$DISP" \
 RECORDNES_SELFTEST="$ROOT/tools/ui-tour.js" \
 RECORDNES_SELFTEST_OUT="$ROOT/tmp/ui-tour.json" \
 RECORDNES_SHOT_DIR="$ROOT/tmp" \
-  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox "$ROM" > "$ROOT/tmp/ui-tour.log" 2>&1 || true
+  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
+    --user-data-dir="$ROOT/tmp/userdata-$$" "$ROM" > "$ROOT/tmp/ui-tour.log" 2>&1 || true
 echo "--- 結果 ---"
 cat "$ROOT/tmp/ui-tour.json" 2>/dev/null || echo "(結果ファイルがありません)"

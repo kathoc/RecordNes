@@ -84,9 +84,13 @@ check("コマ送りで 1 フレームだけ進む", s.frame === p0 + 1, { p0, no
 app.setPaused(false);
 
 // 9. 連射モードの巡回
+// 前回の設定が残っているので、今の状態からの並びで見る。
+const ORDER = ["off", "hold", "toggle"];
+const start = ORDER.indexOf(app.input.turbo.state.mode);
+const expected = [1, 2, 3].map((k) => ORDER[(start + k) % 3]);
 const modes = [];
 for (let i = 0; i < 3; i++) { await hold("KeyT", 50); await sleep(120); modes.push(app.input.turbo.state.mode); }
-check("連射モードが 3 状態を巡る", modes.join(",") === "hold,toggle,off", { modes });
+check("連射モードが 3 状態を巡る", modes.join(",") === expected.join(","), { start: ORDER[start], modes, expected });
 
 // 10. 4-way / 8-way
 await hold("KeyW", 50); await sleep(120);
@@ -135,6 +139,28 @@ check("目印が打てる", s.markers().length >= 1, { markers: s.markers().leng
 check("未保存の記録があると閉じるのを止める", app.hasUnsavedWork() === true, {
   frames: s.totalFrames, savedAt: app.savedAtFrames,
 });
+
+// 15. 保存したあとリセットして録り直すと、また未保存になる
+//     （Recorder が作り直されるので、記録番号を持ち越すと保存済みに見える）
+// 止めたまま確かめる。動かしたままだと記録が伸びて当然未保存になる。
+app.setPaused(true);
+await sleep(100);
+app.savedAtFrames = s.totalFrames;
+app.recordingRevision = s.rec.revision;
+check("保存直後は未保存ではない", app.hasUnsavedWork() === false, {});
+await hold("KeyT", 10);              // 連射モードを触っても記録は変わらない
+await sleep(150);
+check("記録に関係ない操作では未保存にならない", app.hasUnsavedWork() === false, {
+  revision: s.rec.revision, savedRevision: app.recordingRevision,
+});
+s.resetClearsRecording = true;
+await s.reset();
+app.setPaused(false);
+await sleep(1500);                   // 60 フレームより長く録り直す
+check("リセット後に録り直したら未保存に戻る", app.hasUnsavedWork() === true, {
+  frames: s.totalFrames, revision: s.rec.revision, savedRevision: app.recordingRevision,
+});
+app.setPaused(true);
 
 await shot("selftest-4-final");
 return { ok: log.every((x) => x.ok), log, frames: s.totalFrames };

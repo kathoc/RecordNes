@@ -15,6 +15,7 @@ RECORDNES_UNCAP="${RECORDNES_UNCAP:-0}" \
 RECORDNES_SELFTEST="$ROOT/tools/perftest.js" \
 RECORDNES_SELFTEST_OUT="$ROOT/tmp/perftest.json" \
 RECORDNES_SHOT_DIR="$ROOT/tmp" \
-  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox "$ROM" > "$ROOT/tmp/perftest.log" 2>&1 || true
+  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
+    --user-data-dir="$ROOT/tmp/userdata-$$" "$ROM" > "$ROOT/tmp/perftest.log" 2>&1 || true
 echo "--- 結果 ---"
 cat "$ROOT/tmp/perftest.json" 2>/dev/null || echo "(結果ファイルがありません)"

@@ -131,12 +131,15 @@ ipcMain.handle("shot", async (_e, name) => {
   return out;
 });
 
-/** 画面へ問い合わせる。応答が無いまま待ち続けないよう時間を切る。 */
+/** 画面へ問い合わせる。応答が無いまま待ち続けないよう時間を切る。
+ *  時間切れのタイマーは必ず片付ける。残すとプロセスが終われない。 */
 function ask(code, ms = 3000) {
-  return Promise.race([
-    win.webContents.executeJavaScript(code, true),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
-  ]);
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), ms);
+  });
+  return Promise.race([win.webContents.executeJavaScript(code, true), limit])
+    .finally(() => clearTimeout(timer));
 }
 
 async function askBeforeClose() {
@@ -154,21 +157,37 @@ async function askBeforeClose() {
       unknown = true;
     }
 
-    if (unsaved || unknown) {
-      console.log(`[close] ${unknown ? "画面の応答が無いので" : "未保存の記録があるので"}確認を出します`);
+    if (unknown) {
+      // 画面が応答していないので、保存は頼めない。**できない選択肢は出さない。**
+      // 既定は「やめる」。Enter を押しただけで記録が消えるのは避ける。
+      console.log("[close] 画面の応答が無いので確認を出します");
+      const { response } = await dialog.showMessageBox(win, {
+        type: "warning",
+        buttons: ["やめる", "保存せずに閉じる"],
+        defaultId: 0,
+        cancelId: 0,
+        message: "記録が保存済みかどうか確かめられません",
+        detail: "画面が応答していません。少し待つと動き出すことがあります。"
+          + "このまま閉じると、保存していない記録は失われます。",
+      });
+      if (response === 0) return;
+    } else if (unsaved) {
+      console.log("[close] 未保存の記録があるので確認を出します");
       const { response } = await dialog.showMessageBox(win, {
         type: "warning",
         buttons: ["保存して閉じる", "保存せずに閉じる", "やめる"],
         defaultId: 0,
         cancelId: 2,
-        message: unknown ? "記録が保存済みかどうか確かめられません" : "記録がまだ保存されていません",
-        detail: unknown
-          ? "画面が応答していません。閉じると、保存していない記録は失われます。"
-          : "閉じると、この記録は失われます。",
+        message: "記録がまだ保存されていません",
+        detail: "閉じると、この記録は失われます。",
       });
       if (response === 2) return;
       if (response === 0) {
-        const saved = await ask("window.recordnesApp.saveRecordingForClose()", 120000).catch(() => false);
+        // **ここは時間を切らない。** 保存先を選ぶダイアログの前で人が考えている
+        // 時間まで数えてしまい、書き終わっているのに取りやめ扱いになる。
+        const saved = await win.webContents
+          .executeJavaScript("window.recordnesApp.saveRecordingForClose()", true)
+          .catch(() => false);
         if (!saved) return; // 保存を取りやめたなら閉じない
       }
     }

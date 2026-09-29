@@ -556,7 +556,10 @@ export class App {
       if (!this.session.emu.loadState(f.bytes)) throw new Error("このステートは読み込めません");
       const rec = this.session.rec;
       const next = new Recorder(rec.rom, rec.title, "savestate");
+      // 記録を作り直したので、前の記録との比較は意味を持たない。
       this.marked = null;
+      this.savedAtFrames = -1;
+      this.recordingRevision = -1;
       next.originState = f.bytes.slice();
       this.session.rec = next;
       this.session.emu.frameCount = 0;

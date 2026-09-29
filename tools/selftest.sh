@@ -14,6 +14,7 @@ DISPLAY="$DISP" \
 RECORDNES_SELFTEST="$ROOT/tools/selftest.js" \
 RECORDNES_SELFTEST_OUT="$ROOT/tmp/selftest.json" \
 RECORDNES_SHOT_DIR="$ROOT/tmp" \
-  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox "$ROM" > "$ROOT/tmp/selftest.log" 2>&1 || true
+  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
+    --user-data-dir="$ROOT/tmp/userdata-$$" "$ROM" > "$ROOT/tmp/selftest.log" 2>&1 || true
 echo "--- 結果 ---"
 cat "$ROOT/tmp/selftest.json" 2>/dev/null || echo "(結果ファイルがありません)"
