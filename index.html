@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>RecordNes</title>
+<link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <header class="bar top">
+    <button id="btn-rom" class="primary" type="button">ROM を開く</button>
+    <div class="sep"></div>
+    <button id="btn-save-rec" type="button" disabled>記録を保存</button>
+    <button id="btn-open-rec" type="button">記録を開く</button>
+    <button id="btn-export" type="button" disabled>動画を書き出す</button>
+    <div class="spacer"></div>
+    <span id="rom-name" class="rom-name">ROM が読み込まれていません</span>
+    <button id="btn-help" type="button" title="操作の一覧">?</button>
+    <button id="btn-settings" type="button" title="設定">設定</button>
+  </header>
+
+  <main id="stage">
+    <canvas id="screen" width="256" height="240"></canvas>
+    <div id="drop-hint" class="drop-hint">
+      <div class="drop-title">ROM をここへ落とす</div>
+      <div class="drop-sub">または「ROM を開く」。読み込んだ瞬間から記録が始まります</div>
+    </div>
+    <div id="osd" class="osd"></div>
+    <div id="combo-hint" class="combo-hint" hidden></div>
+  </main>
+
+  <section class="bar status">
+    <span id="rec-dot" class="dot"></span>
+    <span id="rec-label" class="rec-label">待機中</span>
+    <span id="time" class="mono">0:00.00</span>
+    <span id="frames" class="mono dim">0 フレーム</span>
+    <div class="spacer"></div>
+    <span id="perf" class="mono dim"></span>
+  </section>
+
+  <section class="timeline-wrap">
+    <canvas id="timeline" height="34"></canvas>
+  </section>
+
+  <section class="bar controls">
+    <button id="btn-restart" type="button" title="最初から再生">⏮</button>
+    <button id="btn-rewind" type="button" title="巻き戻し（押している間）">⏪</button>
+    <button id="btn-pause" type="button" title="一時停止 / 再開">⏸</button>
+    <button id="btn-step" type="button" title="コマ送り">⏭|</button>
+    <button id="btn-ff" type="button" title="早送り（押している間）">⏩</button>
+    <div class="sep"></div>
+    <label class="field">速度
+      <select id="speed">
+        <option value="0">1/16</option>
+        <option value="1">1/8</option>
+        <option value="2">1/4</option>
+        <option value="3">1/2</option>
+        <option value="4" selected>1x</option>
+        <option value="5">2x</option>
+        <option value="6">4x</option>
+        <option value="7">8x</option>
+      </select>
+    </label>
+    <button id="btn-turbo" class="mode-switch" type="button" aria-pressed="false">連射 OFF</button>
+    <button id="btn-ways" class="mode-switch" type="button" aria-pressed="false">8-WAY</button>
+    <div class="sep"></div>
+    <button id="btn-mark" type="button" title="目印を打つ">目印</button>
+    <button id="btn-takeover" type="button" hidden>ここから自分でプレイ</button>
+    <div class="spacer"></div>
+    <label class="field vol">音量
+      <input id="volume" type="range" min="0" max="100" value="70" />
+    </label>
+  </section>
+
+  <div id="panel-settings" class="panel" hidden>
+    <div class="panel-head"><h2>設定</h2><button class="close" data-close="panel-settings" type="button">閉じる</button></div>
+    <div class="panel-body">
+      <section>
+        <h3>記録</h3>
+        <label class="row"><input id="set-reset-keeps" type="checkbox" />
+          <span><b>リセットで記録を消さない</b><br />
+          <small>リセットそのものを記録に残し、タイムラインを続けます。リセット技や周回プレイを一本の記録にできます。<br />
+          切っておくと、リセットは「最初からやり直す」になり、それまでの記録は消えます。</small></span></label>
+        <label class="row"><input id="set-confirm-discard" type="checkbox" checked />
+          <span><b>記録を捨てる前に確認する</b><br /><small>別の ROM を読み込むときなど。</small></span></label>
+      </section>
+      <section>
+        <h3>遅延</h3>
+        <label class="row">ラン・アヘッド
+          <select id="set-runahead">
+            <option value="0">なし（一番軽い）</option>
+            <option value="1" selected>1 フレーム</option>
+            <option value="2">2 フレーム</option>
+            <option value="3">3 フレーム（重い）</option>
+          </select>
+        </label>
+        <p class="note">ゲーム自身が持つ反応の遅れを、先の展開を計算して見せることで打ち消します。
+        段数を上げるほど手応えが早くなりますが、1 フレームあたりの計算量が増えます。
+        <b>記録される内容は段数によって変わりません。</b></p>
+        <div id="runahead-cost" class="note mono"></div>
+      </section>
+      <section>
+        <h3>連射</h3>
+        <label class="row">連射速度 <input id="set-turbo-rate" type="range" min="5" max="30" value="15" />
+          <span id="turbo-rate-label" class="mono">15 Hz</span></label>
+        <p id="turbo-help" class="note"></p>
+      </section>
+      <section>
+        <h3>巻き戻し</h3>
+        <label class="row">巻き戻しの速さ
+          <select id="set-rewind-speed">
+            <option value="1">1x</option>
+            <option value="2" selected>2x</option>
+            <option value="4">4x</option>
+          </select>
+        </label>
+        <p class="note">巻き戻したあとそのまま遊び直すと、記録はその地点でつながります。
+        巻き戻した跡は保存されたファイルに残りません。</p>
+      </section>
+      <section>
+        <h3>この環境</h3>
+        <div id="env-info" class="note mono"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="panel-help" class="panel" hidden>
+    <div class="panel-head"><h2>操作</h2><button class="close" data-close="panel-help" type="button">閉じる</button></div>
+    <div class="panel-body two">
+      <section>
+        <h3>キーボード</h3>
+        <table id="help-keys"></table>
+      </section>
+      <section>
+        <h3>コントローラー</h3>
+        <p class="note"><b>L を押しながら</b>、他のボタンで機能が出ます。L 単独では何も起きません。</p>
+        <table id="help-pad"></table>
+        <h3>通常時</h3>
+        <table id="help-pad-normal"></table>
+      </section>
+    </div>
+  </div>
+
+  <div id="panel-export" class="panel" hidden>
+    <div class="panel-head"><h2>動画を書き出す</h2><button class="close" data-close="panel-export" type="button">閉じる</button></div>
+    <div class="panel-body">
+      <p class="note">記録を最初から決定論的に走らせ直して書き出します。遊んでいるときにスローやコマ送りを
+      使っていても、出てくる動画は常に実速度です。</p>
+      <label class="row">範囲
+        <input id="exp-from" type="number" min="0" value="0" /> 〜
+        <input id="exp-to" type="number" min="0" value="0" />
+        <button id="exp-all" type="button">全体</button>
+        <span id="exp-range-time" class="mono dim"></span>
+      </label>
+      <label class="row">大きさ
+        <select id="exp-scale">
+          <option value="1">256 × 240 (1x)</option>
+          <option value="2" selected>512 × 480 (2x)</option>
+          <option value="3">768 × 720 (3x)</option>
+          <option value="4">1024 × 960 (4x)</option>
+        </select>
+      </label>
+      <label class="row">フレームレート
+        <select id="exp-fps">
+          <option value="60" selected>60 fps</option>
+          <option value="59.94">59.94 fps</option>
+          <option value="30">30 fps</option>
+        </select>
+      </label>
+      <label class="row">画質 (CRF) <input id="exp-crf" type="range" min="14" max="28" value="18" />
+        <span id="exp-crf-label" class="mono">18</span></label>
+      <label class="row"><input id="exp-audio" type="checkbox" checked /> 音声を入れる</label>
+      <div class="row">
+        <button id="exp-start" class="primary" type="button">書き出す</button>
+        <button id="exp-cancel" type="button" hidden>取りやめ</button>
+      </div>
+      <div id="exp-progress" class="progress" hidden><div id="exp-bar"></div><span id="exp-text" class="mono"></span></div>
+      <div id="exp-backend" class="note mono"></div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

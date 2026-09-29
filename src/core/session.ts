@@ -9,6 +9,7 @@
  *  「巻き戻して、そのまま元の続きを早送りで見る」は記録を壊さないし、
  *  「巻き戻して、やり直す」は自動的に一本の記録につながる。 */
 
+import { clearJam, consumeJam } from "./jam-watch.ts";
 import { Emu } from "./emu.ts";
 import type { RomInfo } from "./romid.ts";
 import { Recorder } from "../record/recorder.ts";
@@ -46,6 +47,13 @@ export class Session {
   /** 再生中にコントローラーへ触れたら記録を引き継ぐ */
   takeoverOnInput = true;
 
+  /** キーフレームの復元が壊れていたときに立つ。立っている間、UI は再計算中を出す */
+  recovering = false;
+  /** 復元に使ったキーフレームの位置。壊れていたらこれを捨てる */
+  private lastRestoredFrame = -1;
+  /** JAM を検知した地点。App が次の rAF で recover() を呼ぶ */
+  pendingRecovery: number | null = null;
+
   /** 直近フレームで実際にエミュレーターへ入った入力。HUD 表示用 */
   lastInput: [number, number] = [0, 0];
   lastStats: FrameStats = { emuMs: 0, runAheadMs: 0, stateMs: 0 };
@@ -53,7 +61,6 @@ export class Session {
   private romBytes: Uint8Array | null = null;
   private romInfo: RomInfo | null = null;
   private sink: ((s: number) => void) | null = null;
-  private stateScratch: Uint8Array | null = null;
 
   constructor(opts: SessionOptions = {}) {
     this.emu = new Emu(opts.sampleRate ?? 48000);
@@ -112,7 +119,7 @@ export class Session {
     }
     this.emu.frameCount = 0;
     const target = atFrame === "tail" ? rec.frameCount : atFrame;
-    this.seek(target);
+    if (!this.seek(target)) await this.recover();
   }
 
   /** 今の状態をキーフレームとして記録へ預ける。 */
@@ -145,8 +152,16 @@ export class Session {
 
     const t0 = now();
     this.emu.setSink(this.sink);
+    clearJam();
     this.emu.step(p1, p2);
     const t1 = now();
+
+    // コアが「CPU が止まった」と言ってきたら、直前に復元したキーフレームを疑う。
+    // 記録の正本は入力列なので、電源投入から流し直せば必ず戻れる。
+    if (consumeJam()) {
+      this.pendingRecovery = f;
+      return;
+    }
 
     if (this.mode === "record") {
       // 戻った先で書こうとしている = 巻き戻し後の再開。ここでタイムラインを切る。
@@ -167,6 +182,8 @@ export class Session {
       const r0 = now();
       this.ahead.loadState(state);
       for (let i = 0; i < this.runAhead; i++) this.ahead.step(p1, p2);
+      // 先読み側が止まっても、記録用は無事。ここで旗を下ろして巻き込まない。
+      consumeJam();
       raMs = now() - r0;
     }
     this.snapshotHere(state);
@@ -181,21 +198,30 @@ export class Session {
     return this.seek(target);
   }
 
-  /** 任意のフレームへ飛ぶ。最寄りのキーフレームから入力を再実行して到達する。 */
+  /** 任意のフレームへ飛ぶ。最寄りのキーフレームから入力を再実行して到達する。
+   *
+   *  キーフレームが使えないとき (記録を読み込んだ直後や、壊れた状態を捨てたあと) は
+   *  電源投入から流し直す。遅いが、必ず正しい位置に着く。 */
   seek(target: number): boolean {
     if (!this.rec) return false;
     const goal = Math.max(0, Math.min(target, this.rec.frameCount));
     const k = this.rec.nearestState(goal);
-    if (k) {
-      this.emu.loadState(k.state);
-      this.emu.frameCount = k.frame;
-    } else {
-      // キーフレームが無い = 最初から。ROM を積み直す方が確実。
-      if (!this.romBytes) return false;
-      this.emu.loadState(this.rec.originState ?? new Uint8Array(0));
-      this.emu.frameCount = 0;
+    if (!k) {
+      // 同期では電源投入に戻せない。呼び出し側へ再計算を頼む。
+      this.pendingRecovery = goal;
+      return false;
     }
-    // 足りない分は記録された入力で詰める。音は出さない。
+    this.emu.loadState(k.state);
+    this.emu.frameCount = k.frame;
+    this.lastRestoredFrame = k.frame;
+    this.replayTo(goal);
+    this.snapshotHere();
+    return true;
+  }
+
+  /** 今の位置から goal まで、記録された入力で無音のまま進める。 */
+  private replayTo(goal: number): void {
+    if (!this.rec) return;
     this.emu.setSink(null);
     while (this.emu.frameCount < goal) {
       const f = this.emu.frameCount;
@@ -204,8 +230,27 @@ export class Session {
       this.emu.step(a, b);
     }
     this.emu.setSink(this.sink);
-    this.snapshotHere();
-    return true;
+  }
+
+  /** 壊れた状態から立て直す。電源投入から入力列を流し直して目的のフレームへ戻る。 */
+  async recover(): Promise<void> {
+    const goal = this.pendingRecovery;
+    this.pendingRecovery = null;
+    if (goal === null || !this.rec || !this.romBytes) return;
+    this.recovering = true;
+    try {
+      // 元凶のキーフレームを二度と使わないよう捨てる。
+      if (this.lastRestoredFrame >= 0) this.rec.poison(this.lastRestoredFrame);
+      this.lastRestoredFrame = -1;
+      await this.emu.load(this.romBytes);
+      if (this.rec.originState) this.emu.loadState(this.rec.originState);
+      this.emu.frameCount = 0;
+      clearJam();
+      this.replayTo(goal);
+      this.snapshotHere();
+    } finally {
+      this.recovering = false;
+    }
   }
 
   /** リセット。設定により、記録を消すか、リセット自体を記録するかが変わる。 */

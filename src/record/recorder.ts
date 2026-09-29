@@ -72,6 +72,7 @@ export class Recorder {
 
   /** エミュレートした直後の状態を預ける。密リングと、間隔が来ていれば疎にも入る。 */
   snapshot(frame: number, state: Uint8Array): void {
+    if (this.poisoned.has(frame)) return;
     this.dense.set(frame, state);
     if (this.dense.size > DENSE_FRAMES) {
       // Map は挿入順を保つので、最古は最初のキー。
@@ -104,6 +105,17 @@ export class Recorder {
     for (const f of [...this.dense.keys()]) if (f > this.n) this.dense.delete(f);
     for (const f of [...this.sparse.keys()]) if (f > this.n) this.sparse.delete(f);
   }
+
+  /** 復元すると壊れると分かったキーフレームを捨てる。
+   *  記録の正本は入力列なので、キーフレームは何枚失っても再現性は落ちない。 */
+  poison(frame: number): void {
+    this.dense.delete(frame);
+    this.sparse.delete(frame);
+    this.poisoned.add(frame);
+  }
+
+  /** 捨てた地点。同じ場所を何度も掴まないために覚えておく */
+  private poisoned = new Set<number>();
 
   addEvent(type: TimelineEvent["type"], frame: number, label?: string): void {
     this.events.push({ frame, type, label });
