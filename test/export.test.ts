@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { SMB, haveRom, newSession, scriptedInput } from "./helpers.ts";
 import { Exporter, resampleFrame, scaleNearest } from "../src/export/exporter.ts";
 import { SCREEN_H, SCREEN_W } from "../src/core/emu.ts";
-import { NodeBridge, ffprobe } from "./node-bridge.ts";
+import { NodeBridge, ffprobe, measureVolume } from "./node-bridge.ts";
 
 test("最近傍拡大は、画素を正確に整数倍へ複製する", () => {
   const src = new Uint8Array(SCREEN_W * SCREEN_H * 4);
@@ -81,4 +81,9 @@ test("記録から mp4 を書き出し、長さ・解像度・音声が仕様ど
   const vdur = Number(video.duration ?? dur);
   const adur = Number(audio.duration ?? dur);
   assert.ok(Math.abs(vdur - adur) < 0.06, `映像 ${vdur} 秒 と 音声 ${adur} 秒 のずれ`);
+
+  // 音声ストリームがあるだけでは足りない。無音のまま書き出していないか確かめる。
+  const vol = await measureVolume(out);
+  assert.ok(vol.max > -20, `最大音量 ${vol.max} dB（無音なら -91 付近）`);
+  assert.ok(vol.mean > -45, `平均音量 ${vol.mean} dB`);
 });

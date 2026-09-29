@@ -62,10 +62,29 @@ export class Session {
   private romInfo: RomInfo | null = null;
   private sink: ((s: number) => void) | null = null;
 
+  /** エミュレーターに作らせる音声のサンプルレート。
+   *  **出力先 (AudioContext) と必ず一致させること。** ずれていると音程がずれる。 */
+  private sampleRate: number;
+
   constructor(opts: SessionOptions = {}) {
-    this.emu = new Emu(opts.sampleRate ?? 48000);
+    this.sampleRate = opts.sampleRate ?? 48000;
+    this.emu = new Emu(this.sampleRate);
     this.resetClearsRecording = opts.resetClearsRecording ?? true;
     this.runAhead = opts.runAhead ?? 1;
+  }
+
+  /** 音声のサンプルレートを合わせる。ROM を読み込む前に呼ぶこと。
+   *
+   *  AudioContext のレートは環境が決める (実測: 開発機では 44100、48000 ではない)。
+   *  合わせないと、エミュレーターが毎秒 48000 本作るのに出口は 44100 本しか
+   *  食べないので、音程が約 9% 上がる。動的レート調整が帳尻を合わせてしまうため、
+   *  「少し変だが鳴ってはいる」状態になって気づきにくい。 */
+  setSampleRate(rate: number): void {
+    if (!rate || rate === this.sampleRate) return;
+    this.sampleRate = rate;
+    this.emu = new Emu(rate);
+    this.ahead = null;
+    this.emu.setSink(this.sink);
   }
 
   get frame(): number {

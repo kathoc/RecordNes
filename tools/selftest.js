@@ -20,7 +20,12 @@ await sleep(2000);
 const advanced = s.frame - f0;
 check("実速度で進む", advanced > 100 && advanced < 135, { advanced });
 
-// 3. キーボードで START を押してゲームを始める
+// 3. 音が出口まで流れているか（実際の可聴確認はこの環境ではできない）
+check("音声の経路が動いている", app.audio.started && app.audio.sentSamples > 5000, {
+  started: app.audio.started, sentSamples: app.audio.sentSamples, sampleRate: app.audio.sampleRate,
+});
+
+// 4. キーボードで START を押してゲームを始める
 await hold("Enter", 120);
 await sleep(2500);
 await shot("selftest-1-game");
@@ -28,7 +33,10 @@ await shot("selftest-1-game");
 // 4. 右へ走る
 key("ArrowRight", "keydown");
 await sleep(1500);
-const runFrame = s.frame;
+check("無音ではない波形が出ている", app.audio.lastPeak > 0.001, { peak: app.audio.lastPeak });
+check("エミュレーターと出口のサンプルレートが一致する",
+  s.emu.sampleRate === app.audio.sampleRate,
+  { emu: s.emu.sampleRate, out: app.audio.sampleRate });
 check("入力が届いている", s.lastInput[0] !== 0, { lastInput: s.lastInput[0] });
 key("ArrowRight", "keyup");
 await shot("selftest-2-running");

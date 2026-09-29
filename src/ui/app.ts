@@ -386,6 +386,8 @@ export class App {
   private async startAudio(): Promise<void> {
     try {
       await this.audio.start();
+      // 出口のレートに合わせる。ROM を読み込む前でないと作り直せない。
+      this.session.setSampleRate(this.audio.sampleRate);
       this.session.setSink(this.audio.push);
     } catch (err) {
       console.warn("音声を初期化できませんでした。無音で続けます:", err);

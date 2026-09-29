@@ -77,6 +77,10 @@ export class AudioOut {
 
   /** 1 フレーム分の溜め。まとめて送ると postMessage の回数が減る */
   private pending: number[] = [];
+  /** これまでに出口へ送ったサンプル数。音が本当に流れているかの確認に使う */
+  sentSamples = 0;
+  /** 直近に送った塊の振幅の最大値。無音のまま気づかない事故を防ぐ */
+  lastPeak = 0;
 
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 48000;
@@ -120,6 +124,10 @@ export class AudioOut {
     }
     const arr = new Float32Array(this.pending);
     this.pending.length = 0;
+    let peak = 0;
+    for (let i = 0; i < arr.length; i++) { const a = Math.abs(arr[i]); if (a > peak) peak = a; }
+    this.lastPeak = peak;
+    this.sentSamples += arr.length;
     this.node.port.postMessage(arr, [arr.buffer]);
   }
 

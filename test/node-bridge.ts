@@ -49,3 +49,19 @@ export function ffprobe(path: string): Promise<Record<string, unknown>> {
     p.on("close", (c) => (c === 0 ? resolve(JSON.parse(out)) : reject(new Error(`ffprobe exit ${c}`))));
   });
 }
+
+/** 音量を測る。音声ストリームがあるのに無音、という事故を捕まえるため。 */
+export function measureVolume(path: string): Promise<{ mean: number; max: number }> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpegBinary(), ["-v", "info", "-i", path, "-af", "volumedetect", "-f", "null", "-"]);
+    let err = "";
+    p.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+    p.on("error", reject);
+    p.on("close", () => {
+      const mean = Number(err.match(/mean_volume:\s*(-?[\d.]+)/)?.[1] ?? NaN);
+      const max = Number(err.match(/max_volume:\s*(-?[\d.]+)/)?.[1] ?? NaN);
+      if (Number.isNaN(mean) || Number.isNaN(max)) reject(new Error(`音量を読み取れません\n${err.slice(-500)}`));
+      else resolve({ mean, max });
+    });
+  });
+}
