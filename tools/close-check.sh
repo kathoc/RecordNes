@@ -19,13 +19,16 @@ pkill -f "Xvfb $DISP" 2>/dev/null || true
 sleep 1
 Xvfb "$DISP" -screen 0 800x600x24 -nolisten tcp >/dev/null 2>&1 &
 XVFB=$!
-trap 'kill $XVFB 2>/dev/null || true' EXIT
+trap 'kill $XVFB 2>/dev/null || true; rm -rf "$ROOT/tmp/userdata-close-$$"' EXIT
 sleep 1
 
 run() { # run <ログ名> <引数>
   local name="$1"; shift
+  # 設定を持ち越さない。uncapFrameRate が入っていると rAF が数百Hzで回り、
+  # 画面への問い合わせが時間切れして別の分岐に落ちる。
   DISPLAY="$DISP" RECORDNES_CLOSE_AFTER=6 \
-    timeout 20 "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox "$@" \
+    timeout 20 "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
+      --user-data-dir="$ROOT/tmp/userdata-close-$$" "$@" \
     > "$ROOT/tmp/close-$name.log" 2>&1
   echo "$?"
 }

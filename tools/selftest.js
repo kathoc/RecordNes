@@ -137,7 +137,7 @@ check("目印が打てる", s.markers().length >= 1, { markers: s.markers().leng
 
 // 14. 未保存のまま閉じようとしたら止まること（確認そのものは出さずに判定だけ見る）
 check("未保存の記録があると閉じるのを止める", app.hasUnsavedWork() === true, {
-  frames: s.totalFrames, savedAt: app.savedAtFrames,
+  frames: s.totalFrames,
 });
 
 // 15. 保存したあとリセットして録り直すと、また未保存になる
@@ -145,20 +145,46 @@ check("未保存の記録があると閉じるのを止める", app.hasUnsavedWo
 // 止めたまま確かめる。動かしたままだと記録が伸びて当然未保存になる。
 app.setPaused(true);
 await sleep(100);
-app.savedAtFrames = s.totalFrames;
-app.recordingRevision = s.rec.revision;
-check("保存直後は未保存ではない", app.hasUnsavedWork() === false, {});
+
+// **本物の保存経路を通す。** 値を直接代入して確かめると、保存側が記録番号を
+// 更新しなくなっても気づけない（同語反復になる）。
+const savedPath = await app.saveRecordingForClose();
+check("記録をファイルへ保存できる", typeof savedPath === "boolean" ? savedPath : !!savedPath, { savedPath });
+check("保存したら未保存ではなくなる", app.hasUnsavedWork() === false, {});
 await hold("KeyT", 10);              // 連射モードを触っても記録は変わらない
 await sleep(150);
-check("記録に関係ない操作では未保存にならない", app.hasUnsavedWork() === false, {
-  revision: s.rec.revision, savedRevision: app.recordingRevision,
-});
-s.resetClearsRecording = true;
-await s.reset();
+check("記録に関係ない操作では未保存にならない", app.hasUnsavedWork() === false, {});
+
+// **本物のリセット経路を通す。** Session.reset() を直接呼ぶと、UI 側が
+// 記録番号を戻しているかどうかを確かめられない。
+document.getElementById("set-reset-keeps").checked = false;
+document.getElementById("set-reset-keeps").dispatchEvent(new Event("change"));
+const cd = document.getElementById("set-confirm-discard");
+if (cd.checked) { cd.checked = false; cd.dispatchEvent(new Event("change")); }
 app.setPaused(false);
-await sleep(1500);                   // 60 フレームより長く録り直す
+window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyR", ctrlKey: true, bubbles: true }));
+await sleep(2000);                   // 60 フレームより長く録り直す
+check("リセットで記録が作り直される", s.totalFrames > 60 && s.rec.revision < 400, {
+  frames: s.totalFrames, revision: s.rec.revision,
+});
 check("リセット後に録り直したら未保存に戻る", app.hasUnsavedWork() === true, {
-  frames: s.totalFrames, revision: s.rec.revision, savedRevision: app.recordingRevision,
+  revision: s.rec.revision,
+});
+
+// **番号がたまたま一致しても、未保存と分かること。**
+// 作り直した記録の番号は 0 から数え直すので、放っておけばいつか保存時の番号と
+// ぶつかる。ぶつかった瞬間だけ「保存済み」に見える作りだと、そこで記録が消える。
+// 自然に待つと何分もかかるので、ここでは番号を直接合わせて確かめる。
+const savedRev = (() => {
+  // 保存したときの番号を取り出す（外からは見えないので、同じ値を作って試す）
+  for (let r = 0; r < 200000; r++) {
+    s.rec.revision = r;
+    if (!app.hasUnsavedWork()) return r;
+  }
+  return -1;
+})();
+check("記録を作り直したら、番号が一致しても未保存のまま", savedRev === -1, {
+  ぶつかった番号: savedRev,
 });
 app.setPaused(true);
 

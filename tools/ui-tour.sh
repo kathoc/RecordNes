@@ -8,7 +8,7 @@ mkdir -p "$ROOT/tmp"
 pkill -f "Xvfb $DISP" 2>/dev/null || true
 Xvfb "$DISP" -screen 0 1280x1000x24 -nolisten tcp >/dev/null 2>&1 &
 XVFB=$!
-trap 'kill $XVFB 2>/dev/null || true' EXIT
+trap 'kill $XVFB 2>/dev/null || true; rm -rf "$ROOT/tmp/userdata-$$"' EXIT
 sleep 1
 DISPLAY="$DISP" \
 RECORDNES_SELFTEST="$ROOT/tools/ui-tour.js" \

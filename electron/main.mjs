@@ -242,6 +242,14 @@ ipcMain.handle("file:open", async (_e, kind) => {
 });
 
 ipcMain.handle("file:save", async (_e, kind, suggestedName, bytes) => {
+  // 自動検証では保存ダイアログを出せない。出力先を環境変数で渡せるようにする。
+  // ここを通しておかないと、保存の経路そのものを自動で確かめられない。
+  const forced = process.env.RECORDNES_SAVE_DIR;
+  if (forced) {
+    const p = path.join(forced, suggestedName);
+    await writeFile(p, Buffer.from(bytes));
+    return p;
+  }
   const r = await dialog.showSaveDialog(win, {
     defaultPath: suggestedName,
     filters: FILTERS[kind] ?? [],

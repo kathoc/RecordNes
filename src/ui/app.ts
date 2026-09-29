@@ -88,8 +88,13 @@ export class App {
   private mouseRewind = false;
   /** 画面の早送りボタンを押している間 true */
   private mouseFastForward = false;
-  /** 記録が書き換わった回数。保存済みかどうかの判定に使う */
-  private recordingRevision = 0;
+  /** 最後に保存したときの記録と、そのときの書き換え回数。
+   *
+   *  **記録の実体そのものを覚える。** 数値だけを比べると、記録を作り直した
+   *  (リセット、別の ROM、ステートからの開始) ときに番号を戻し忘れるだけで
+   *  「保存済み」に見えてしまう。戻し忘れは実際に 3 回やった。
+   *  実体が違えば未保存、と決めておけば、戻し忘れようがない。 */
+  private savedMark: { rec: Recorder; revision: number } | null = null;
   /** 画面を描き直す必要があるか。vsync 制限を外すと rAF が数百 Hz で回るので、
    *  何も変わっていないフレームまで描くと CPU を無駄に食う。 */
   private dirty = true;
@@ -97,8 +102,6 @@ export class App {
   /** 覚えた位置。ステートセーブの代わりに、タイムライン上の地点を覚える。
    *  状態そのものを抱えるより軽く、記録との食い違いも起きない。 */
   private marked: { frame: number; since: number } | null = null;
-  /** 最後に保存したときのフレーム数。これと違えば「まだ保存していない」 */
-  savedAtFrames = -1;
   private busy = false;
   /** 直近の rAF で使った実時間の内訳。計測表示用 */
   private perf = { emu: 0, raf: 0, latency: 0 };
@@ -386,14 +389,7 @@ export class App {
     }
     const cleared = this.session.resetClearsRecording;
     await this.session.reset();
-    if (cleared) {
-      // Recorder ごと作り直されるので、前の記録との比較は意味を持たない。
-      // 戻し忘れると、保存 → リセット → 同じ長さまで録り直し、で
-      // 「保存済み」に見えてしまう。
-      this.savedAtFrames = -1;
-      this.recordingRevision = -1;
-      this.marked = null;
-    }
+    if (cleared) this.marked = null;   // 記録ごと作り直されるので持ち越さない
     this.audio.clear();
     this.setPaused(false);
     this.toast(this.session.resetClearsRecording ? "リセットしました（記録は消えました）" : "リセットを記録しました");
@@ -435,8 +431,6 @@ export class App {
       await this.startAudio();
       await this.session.loadRom(bytes, info, displayTitle(name));
       this.romInfo = info;
-      this.savedAtFrames = -1;
-      this.recordingRevision = -1;
       this.marked = null;   // 覚えた地点は前の記録のもの。持ち越さない
       this.input.reset();
       this.input.setWays(this.settings.ways[info.sha1] ?? 8);
@@ -465,8 +459,7 @@ export class App {
       const bytes = await serialize(this.session.rec, this.session.emu.sram());
       const path = await this.bridge.saveFile("recording", suggestFileName(this.session.rec.meta()), bytes);
       if (path) {
-        this.savedAtFrames = this.session.totalFrames;
-        this.recordingRevision = this.session.rec.revision;
+        this.savedMark = { rec: this.session.rec, revision: this.session.rec.revision };
         this.toast(`記録を保存しました: ${path}`, "ok");
       }
       return !!path;
@@ -486,7 +479,8 @@ export class App {
   hasUnsavedWork(): boolean {
     const rec = this.session.rec;
     if (!rec || rec.frameCount <= 60) return false;
-    return rec.revision !== this.recordingRevision;
+    if (!this.savedMark) return true;
+    return this.savedMark.rec !== rec || this.savedMark.revision !== rec.revision;
   }
 
   /** 閉じる前に main から呼ばれる。保存できたら true。 */
@@ -512,7 +506,6 @@ export class App {
         await this.startAudio();
         await this.session.loadRom(r.bytes, info, displayTitle(r.name));
         this.romInfo = info;
-        this.savedAtFrames = -1;
         $("rom-name").textContent = `${displayTitle(r.name)}  (マッパー ${info.mapper})`;
         $("drop-hint").classList.add("hide");
         for (const id of ["btn-save-rec", "btn-export"]) ($(id) as HTMLButtonElement).disabled = false;
@@ -523,8 +516,7 @@ export class App {
       );
       await this.session.adoptRecording(rec, resume ? "tail" : 0);
       this.session.mode = resume ? "record" : "playback";
-      this.savedAtFrames = rec.frameCount;   // 読み込んだ内容はディスクにある
-      this.recordingRevision = rec.revision;
+      this.savedMark = { rec, revision: rec.revision };
       this.marked = null;
       this.audio.clear();
       this.setPaused(false);
@@ -556,10 +548,7 @@ export class App {
       if (!this.session.emu.loadState(f.bytes)) throw new Error("このステートは読み込めません");
       const rec = this.session.rec;
       const next = new Recorder(rec.rom, rec.title, "savestate");
-      // 記録を作り直したので、前の記録との比較は意味を持たない。
       this.marked = null;
-      this.savedAtFrames = -1;
-      this.recordingRevision = -1;
       next.originState = f.bytes.slice();
       this.session.rec = next;
       this.session.emu.frameCount = 0;
@@ -805,8 +794,8 @@ export class App {
       const { rec } = await parseToRecorder(bytes);
       if (!this.romInfo) { this.toast("先に ROM を読み込んでください", "warn"); return; }
       await this.session.adoptRecording(rec, "tail");
-      this.savedAtFrames = rec.frameCount;
-      this.recordingRevision = this.session.rec?.revision ?? 0;
+      const adopted = this.session.rec;
+      this.savedMark = adopted ? { rec: adopted, revision: adopted.revision } : null;
       this.marked = null;
       this.toast("記録を読み込みました", "ok");
     } catch (err) {

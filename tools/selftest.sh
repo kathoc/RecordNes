@@ -8,12 +8,13 @@ mkdir -p "$ROOT/tmp"
 pkill -f "Xvfb $DISP" 2>/dev/null || true
 Xvfb "$DISP" -screen 0 1280x1000x24 -nolisten tcp >/dev/null 2>&1 &
 XVFB=$!
-trap 'kill $XVFB 2>/dev/null || true' EXIT
+trap 'kill $XVFB 2>/dev/null || true; rm -rf "$ROOT/tmp/userdata-$$"' EXIT
 sleep 1
 DISPLAY="$DISP" \
 RECORDNES_SELFTEST="$ROOT/tools/selftest.js" \
 RECORDNES_SELFTEST_OUT="$ROOT/tmp/selftest.json" \
 RECORDNES_SHOT_DIR="$ROOT/tmp" \
+RECORDNES_SAVE_DIR="$ROOT/tmp" \
   "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox \
     --user-data-dir="$ROOT/tmp/userdata-$$" "$ROM" > "$ROOT/tmp/selftest.log" 2>&1 || true
 echo "--- 結果 ---"
