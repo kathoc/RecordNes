@@ -4,14 +4,14 @@
 # ネイティブのダイアログは自動では押せないので、「出たところで止まる」ことで判定する。
 # 2 つの場合を両方確かめる。片方だけだと、常に引き止める実装でも通ってしまう。
 set -uo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$(cd "$(dirname "$0")" && pwd)/lib-run.sh"
 ROM="${1:-${RECORDNES_ROM:-/home/sonohoka/Playground/roms/nes/Super Mario Bros. (World).NES}}"
 DISP=":83"
 mkdir -p "$ROOT/tmp"
 
 # **必ず作り直してから試す。** 古い dist を相手にすると、直したはずの
 # 画面側のコードが混ざらないまま緑になる。
-(cd "$ROOT" && npm run build >/dev/null 2>&1) || { echo "NG  ビルドに失敗しました"; exit 1; }
+build_or_die || exit 1
 
 # Xvfb は 1 本だけ立てて使い回す。毎回立て直すと、前のソケットが残っている間に
 # 同じ番号で起動できず、2 回目が「X server が無い」で落ちる。

@@ -9,4 +9,6 @@ build_or_die || exit 1
 clear_artifacts "$ROOT"/tmp/tour-*.png
 run_in_app ":82" "$ROOT/tools/ui-tour.js" "$ROOT/tmp/ui-tour.json" "$ROOT/tmp/ui-tour.log" "$ROM" || exit 1
 report_result "$ROOT/tmp/ui-tour.json" || exit 1
+# 撮れているかまで見る。ファイルがあるだけでは、真っ黒でも通ってしまう。
+check_images "$ROOT"/tmp/tour-*.png || exit 1
 ls -1 "$ROOT"/tmp/tour-*.png

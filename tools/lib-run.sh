@@ -63,6 +63,49 @@ run_in_app() { # <disp> <script.js> <out.json> <log> [args...]
   return 0
 }
 
+# 測定結果を出す。合否を持たない JSON 用。読めなければ NG。
+report_metrics() { # <out.json>
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"NG  結果を読めません（途中で切れている可能性があります）: {e}")
+    sys.exit(1)
+if "error" in d:
+    print("NG  測定できませんでした: " + str(d["error"]))
+    sys.exit(1)
+print(json.dumps(d, ensure_ascii=False, indent=2))
+PY
+}
+
+# 撮った画像がちゃんと絵になっているかを見る。
+# capturePage が空を返すと、例外は出ないまま 0 バイトの PNG が並ぶ。
+check_images() { # <png...>
+  local bad=0 f
+  for f in "$@"; do
+    if [ ! -s "$f" ]; then
+      echo "NG  $f が空です"
+      bad=1
+      continue
+    fi
+    local size
+    size=$(identify -format "%wx%h" "$f" 2>/dev/null) || { echo "NG  $f を画像として読めません"; bad=1; continue; }
+    case "$size" in
+      [1-9]*x[1-9]*) ;;
+      *) echo "NG  $f の大きさが不正です ($size)"; bad=1 ;;
+    esac
+    # 単色（真っ黒など）は撮れていないのと同じ。標準偏差で見る。
+    local sd
+    sd=$(identify -format "%[standard-deviation]" "$f" 2>/dev/null || echo 0)
+    if [ "${sd%%.*}" -lt 100 ] 2>/dev/null; then
+      echo "NG  $f がほぼ単色です (標準偏差 $sd)"
+      bad=1
+    fi
+  done
+  return $bad
+}
+
 # 結果 JSON を読んで合否を返す。**どのスクリプトも必ずこれを通す。**
 # 読まずに「できました」と出すと、中で落ちていても緑になる。
 report_result() { # <out.json> [--items]
