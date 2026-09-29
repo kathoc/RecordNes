@@ -19,9 +19,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const isDev = !app.isPackaged && process.env.RECORDNES_DEV === "1";
 
-/** 自動検証。`RECORDNES_SELFTEST=<script.js>` を付けて起動すると、そのスクリプトを
- *  画面の中で走らせ、結果を `RECORDNES_SELFTEST_OUT` へ書いて終了する。
- *  実際のアプリを実際のループで動かしたまま確かめるための唯一の入口。 */
 /** 自動検証のための迂回（保存ダイアログを出さない等）を許すかどうか。
  *
  *  環境変数だけを条件にすると、たまたま同じ名前の変数が入っている環境で
@@ -143,10 +140,13 @@ async function createWindow() {
   }
 }
 
-/** 画面の写真を撮る。自動検証から呼ぶ。 */
+/** 画面の写真を撮る。自動検証からしか呼ばない。
+ *  名前は基底名だけにする。`../` を渡されて外へ書き出させない。 */
 ipcMain.handle("shot", async (_e, name) => {
+  if (!testMode) throw new Error("この機能は --recordnes-test-mode でのみ使えます");
+  const safe = path.basename(String(name)).replace(/[^\w.-]/g, "_") || "shot";
   const img = await win.webContents.capturePage();
-  const out = path.join(process.env.RECORDNES_SHOT_DIR ?? app.getPath("temp"), `${name}.png`);
+  const out = path.join(process.env.RECORDNES_SHOT_DIR ?? app.getPath("temp"), `${safe}.png`);
   await writeFile(out, img.toPNG());
   return out;
 });
