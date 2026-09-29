@@ -18,6 +18,8 @@ app.input.turbo.setMode("toggle");
 app.input.setWays(4);
 app.setSpeed(2);
 app.addMarker();
+await sleep(1500);
+app.addMarker();
 await sleep(600);
 await shot("tour-1-playing");
 app.setSpeed(4);

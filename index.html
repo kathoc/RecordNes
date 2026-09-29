@@ -159,12 +159,19 @@
     <div class="panel-body">
       <p class="note">記録を最初から決定論的に走らせ直して書き出します。遊んでいるときにスローやコマ送りを
       使っていても、出てくる動画は常に実速度です。</p>
+      <label class="row">名前
+        <input id="exp-title" type="text" placeholder="動画のファイル名になります" style="flex:1;min-width:20ch" />
+      </label>
       <label class="row">範囲
         <input id="exp-from" type="number" min="0" value="0" /> 〜
         <input id="exp-to" type="number" min="0" value="0" />
         <button id="exp-all" type="button">全体</button>
         <span id="exp-range-time" class="mono dim"></span>
       </label>
+      <div class="row" id="exp-markers-row" hidden>
+        <span class="dim">目印から選ぶ</span>
+        <span id="exp-markers"></span>
+      </div>
       <label class="row">大きさ
         <select id="exp-scale">
           <option value="1">256 × 240 (1x)</option>

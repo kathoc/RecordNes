@@ -885,8 +885,37 @@ export class App {
     if (!rec) return;
     ($("exp-from") as HTMLInputElement).value = "0";
     ($("exp-to") as HTMLInputElement).value = String(rec.frameCount);
+    ($("exp-title") as HTMLInputElement).value = rec.title;
+    this.buildExportMarkers();
     this.updateExportRangeLabel();
     this.togglePanel("panel-export");
+  }
+
+  /** 目印を押すだけで範囲を決められるようにする。
+   *  フレーム番号を手で打たせるのは、目的からして遠回りすぎる。 */
+  private buildExportMarkers(): void {
+    const rec = this.session.rec;
+    const row = $("exp-markers-row") as HTMLElement;
+    const box = $("exp-markers");
+    box.textContent = "";
+    const marks = rec?.events.filter((e) => e.type === "marker") ?? [];
+    row.hidden = marks.length === 0;
+    if (!rec || marks.length === 0) return;
+
+    const points = [0, ...marks.map((m) => m.frame), rec.frameCount];
+    for (let i = 0; i < points.length - 1; i++) {
+      const from = points[i];
+      const to = points[i + 1];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = `${formatTime(from)} 〜 ${formatTime(to)}`;
+      b.onclick = () => {
+        ($("exp-from") as HTMLInputElement).value = String(from);
+        ($("exp-to") as HTMLInputElement).value = String(to);
+        this.updateExportRangeLabel();
+      };
+      box.append(b);
+    }
   }
 
   private updateExportRangeLabel(): void {
@@ -936,6 +965,8 @@ export class App {
 
     const from = Number(($("exp-from") as HTMLInputElement).value);
     const to = Number(($("exp-to") as HTMLInputElement).value);
+    const title = ($("exp-title") as HTMLInputElement).value.trim() || rec.title;
+    rec.title = title;
     const bar = $("exp-bar");
     const text = $("exp-text");
     ($("exp-progress") as HTMLElement).hidden = false;
@@ -956,7 +987,7 @@ export class App {
             ? "準備しています…"
             : `${p.frame.toLocaleString()} / ${p.total.toLocaleString()} フレーム  ${pct.toFixed(1)}%  残り ${formatSeconds(left)}`;
         },
-        `${rec.title}.mp4`,
+        `${title.replace(/[\\/:*?"<>|]/g, "_")}.mp4`,
       );
       text.textContent = `書き出しました: ${path}`;
       this.toast(`動画を書き出しました: ${path}`, "ok");
