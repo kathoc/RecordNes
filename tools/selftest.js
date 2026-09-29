@@ -120,14 +120,21 @@ app.setPaused(false);
 // 再生を最後まで見届ける（早送りで待ち時間を詰める）
 app.setSpeed(7);
 for (let i = 0; i < 300 && s.frame < savedFrames; i++) await sleep(50);
+app.setPaused(true);
 app.setSpeed(4);
 check("再生が末尾まで進む", s.frame >= savedFrames, { frame: s.frame, savedFrames });
-check("再生後の画面が記録時と一致する", hash(s.emu.pixels) === endHash, {});
-app.setPaused(true);
+// 早送りで少し行き過ぎることがあるので、末尾ちょうどへ置き直してから比べる。
+s.seek(savedFrames);
+check("再生後の画面が記録時と一致する", hash(s.emu.pixels) === endHash, { frame: s.frame });
 
 // 13. 目印
 app.addMarker();
 check("目印が打てる", s.markers().length >= 1, { markers: s.markers().length });
+
+// 14. 未保存のまま閉じようとしたら止まること（確認そのものは出さずに判定だけ見る）
+check("未保存の記録があると閉じるのを止める", app.hasUnsavedWork() === true, {
+  frames: s.totalFrames, savedAt: app.savedAtFrames,
+});
 
 await shot("selftest-4-final");
 return { ok: log.every((x) => x.ok), log, frames: s.totalFrames };

@@ -92,6 +92,10 @@ export class App {
   /** 覚えた位置。ステートセーブの代わりに、タイムライン上の地点を覚える。
    *  状態そのものを抱えるより軽く、記録との食い違いも起きない。 */
   private marked: { frame: number; generation: number } | null = null;
+  /** 最後に保存したときのフレーム数。これと違えば「まだ保存していない」 */
+  savedAtFrames = -1;
+  /** 閉じてよいと判断したあと。二度目の確認を出さない */
+  private allowClose = false;
   private busy = false;
   /** 直近の rAF で使った実時間の内訳。計測表示用 */
   private perf = { emu: 0, raf: 0, latency: 0 };
@@ -416,7 +420,7 @@ export class App {
       await this.startAudio();
       await this.session.loadRom(bytes, info, displayTitle(name));
       this.romInfo = info;
-
+      this.savedAtFrames = -1;
       this.input.reset();
       this.input.setWays(this.settings.ways[info.sha1] ?? 8);
       this.audio.clear();
@@ -434,21 +438,46 @@ export class App {
     }
   }
 
-  private async saveRecording(): Promise<void> {
+  private async saveRecording(): Promise<boolean> {
     if (!this.session.rec || this.session.totalFrames === 0) {
       this.toast("まだ記録がありません", "warn");
-      return;
+      return false;
     }
     this.busy = true;
     try {
       const bytes = await serialize(this.session.rec, this.session.emu.sram());
       const path = await this.bridge.saveFile("recording", suggestFileName(this.session.rec.meta()), bytes);
-      if (path) this.toast(`記録を保存しました: ${path}`, "ok");
+      if (path) {
+        this.savedAtFrames = this.session.totalFrames;
+        this.toast(`記録を保存しました: ${path}`, "ok");
+      }
+      return !!path;
     } catch (err) {
       this.toast(`保存に失敗しました: ${(err as Error).message}`, "warn");
+      return false;
     } finally {
       this.busy = false;
     }
+  }
+
+
+  /** 閉じたら失われる記録があるか。自動検証から見えるよう公開している。 */
+  hasUnsavedWork(): boolean {
+    const n = this.session.totalFrames;
+    return n > 60 && n !== this.savedAtFrames;
+  }
+
+  /** 閉じる直前の確認。**記録は明示的に保存する決まりなので、ここで聞かないと
+   *  そのまま消える。** 1 時間遊んだ記録が黙って消えるのが最悪の結末。 */
+  private async confirmClose(): Promise<void> {
+    const t = formatTime(this.session.totalFrames);
+    const save = confirm(
+      `記録 (${t}) がまだ保存されていません。\n\n` +
+      `[OK] 保存してから閉じる\n[キャンセル] 保存せずに閉じる`,
+    );
+    if (save && !(await this.saveRecording())) return; // 保存を取りやめたら閉じない
+    this.allowClose = true;
+    window.close();
   }
 
   private async openRecording(): Promise<void> {
@@ -469,7 +498,7 @@ export class App {
         await this.startAudio();
         await this.session.loadRom(r.bytes, info, displayTitle(r.name));
         this.romInfo = info;
-
+        this.savedAtFrames = -1;
         $("rom-name").textContent = `${displayTitle(r.name)}  (マッパー ${info.mapper})`;
         $("drop-hint").classList.add("hide");
         for (const id of ["btn-save-rec", "btn-export"]) ($(id) as HTMLButtonElement).disabled = false;
@@ -480,6 +509,7 @@ export class App {
       );
       await this.session.adoptRecording(rec, resume ? "tail" : 0);
       this.session.mode = resume ? "record" : "playback";
+      this.savedAtFrames = rec.frameCount;   // 読み込んだ内容はディスクにある
       this.audio.clear();
       this.setPaused(false);
       this.setSpeed(NORMAL_SPEED);
@@ -720,6 +750,13 @@ export class App {
         if (file.name.toLowerCase().endsWith(".rnes")) void this.adoptDropped(bytes);
         else void this.loadRomBytes(bytes, file.name);
       });
+    });
+
+    window.addEventListener("beforeunload", (e) => {
+      if (this.allowClose || !this.hasUnsavedWork()) return;
+      e.preventDefault();
+      e.returnValue = "";
+      void this.confirmClose();
     });
 
     // 音声は最初のクリックで起こす (自動再生制限)。
