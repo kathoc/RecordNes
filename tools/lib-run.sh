@@ -81,25 +81,47 @@ PY
 
 # 撮った画像がちゃんと絵になっているかを見る。
 # capturePage が空を返すと、例外は出ないまま 0 バイトの PNG が並ぶ。
+#
+# 判定は 2 つ。**どちらも量子化深度に依存しない形で取る**
+# （%[standard-deviation] の生値は Q8 ビルドと Q16 ビルドで 256 倍違い、
+#  しきい値を数値で置くと環境によって全部落ちるか全部通るかになる）。
+#
+#   - 色数 (%k): 画面写真なら数千色ある。真っ黒や小さな破片だけなら数色
+#   - 正規化した標準偏差 (%[fx:standard_deviation]): 0〜1 で返る
 check_images() { # <png...>
-  local bad=0 f
+  if ! command -v identify >/dev/null 2>&1; then
+    echo "NG  identify (ImageMagick) が無いので、画像を確かめられません"
+    return 1
+  fi
+  local bad=0 f info colors sd
   for f in "$@"; do
     if [ ! -s "$f" ]; then
       echo "NG  $f が空です"
       bad=1
       continue
     fi
-    local size
-    size=$(identify -format "%wx%h" "$f" 2>/dev/null) || { echo "NG  $f を画像として読めません"; bad=1; continue; }
-    case "$size" in
-      [1-9]*x[1-9]*) ;;
-      *) echo "NG  $f の大きさが不正です ($size)"; bad=1 ;;
-    esac
-    # 単色（真っ黒など）は撮れていないのと同じ。標準偏差で見る。
-    local sd
-    sd=$(identify -format "%[standard-deviation]" "$f" 2>/dev/null || echo 0)
-    if [ "${sd%%.*}" -lt 100 ] 2>/dev/null; then
-      echo "NG  $f がほぼ単色です (標準偏差 $sd)"
+    if ! info=$(identify -format "%w %h %k %[fx:standard_deviation]" "$f" 2>&1); then
+      echo "NG  $f を画像として読めません: $info"
+      bad=1
+      continue
+    fi
+    read -r w h colors sd <<<"$info"
+    if [ "${w:-0}" -lt 100 ] 2>/dev/null || [ "${h:-0}" -lt 100 ] 2>/dev/null; then
+      echo "NG  $f の大きさが不正です (${w}x${h})"
+      bad=1
+      continue
+    fi
+    # 数値で返らない環境では、黙って合格にしない。
+    if ! python3 -c "
+import sys
+try:
+    colors, sd = int(sys.argv[1]), float(sys.argv[2])
+except ValueError:
+    print('  (色数か標準偏差を数値として読めません: %r %r)' % (sys.argv[1], sys.argv[2]))
+    sys.exit(2)
+sys.exit(0 if colors >= 64 and sd >= 0.02 else 1)
+" "$colors" "$sd"; then
+      echo "NG  $f が絵になっていません (色数 $colors / 標準偏差 $sd)"
       bad=1
     fi
   done
