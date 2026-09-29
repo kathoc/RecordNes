@@ -187,6 +187,8 @@ export class App {
       this.lastStatusAt = ts;
       this.drawTimeline();
       this.updateStatus();
+      // ボタンの見た目は毎回作り直す。状態を 2 か所に持つと必ずずれる。
+      this.syncControls();
     }
   };
 
@@ -291,14 +293,11 @@ export class App {
     this.paused = v;
     this.acc = 0;
     this.dirty = true;
-    $("btn-pause").textContent = v ? "▶" : "⏸";
-    $("btn-pause").classList.toggle("on", v);
     if (v) this.audio.drop();
   }
 
   private setSpeed(i: number): void {
     this.speedIndex = Math.max(0, Math.min(SPEEDS.length - 1, i));
-    ($("speed") as HTMLSelectElement).value = String(this.speedIndex);
     this.acc = 0;
     this.toast(`速度 ${SPEED_LABEL[this.speedIndex]}`);
   }
@@ -776,6 +775,11 @@ export class App {
   }
 
   private syncControls(): void {
+    const speed = $("speed") as HTMLSelectElement;
+    if (speed.value !== String(this.speedIndex)) speed.value = String(this.speedIndex);
+    const pause = $("btn-pause");
+    pause.textContent = this.paused ? "▶" : "⏸";
+    pause.classList.toggle("on", this.paused);
     const mode = this.input.turbo.state.mode;
     const tb = $("btn-turbo");
     tb.textContent = TURBO_LABEL[mode];
@@ -790,8 +794,8 @@ export class App {
     const s = this.session.lastStats;
     const per = s.emuMs + s.runAheadMs + s.stateMs;
     $("runahead-cost").textContent = this.session.rec
-      ? `1 フレームあたり ${per.toFixed(2)} ms（予算 ${FRAME_MS.toFixed(2)} ms）` +
-        `  内訳: 本体 ${s.emuMs.toFixed(2)} / 先読み ${s.runAheadMs.toFixed(2)} / 状態保存 ${s.stateMs.toFixed(2)}`
+      ? `1 フレームあたり ${per.toFixed(2)} ms（予算 ${FRAME_MS.toFixed(2)} ms）\n` +
+        `内訳  本体 ${s.emuMs.toFixed(2)} ms ／ 先読み ${s.runAheadMs.toFixed(2)} ms ／ 状態保存 ${s.stateMs.toFixed(2)} ms`
       : "ROM を読み込むと実測値が出ます";
   }
 

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# 実アプリを Xvfb 上で起動し、tools/ui-tour.js を画面の中で走らせる。
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROM="${1:-/home/sonohoka/Playground/roms/nes/Super Mario Bros. (World).NES}"
+DISP=":82"
+mkdir -p "$ROOT/tmp"
+pkill -f "Xvfb $DISP" 2>/dev/null || true
+Xvfb "$DISP" -screen 0 1280x1000x24 -nolisten tcp >/dev/null 2>&1 &
+XVFB=$!
+trap 'kill $XVFB 2>/dev/null || true' EXIT
+sleep 1
+DISPLAY="$DISP" \
+RECORDNES_SELFTEST="$ROOT/tools/ui-tour.js" \
+RECORDNES_SELFTEST_OUT="$ROOT/tmp/ui-tour.json" \
+RECORDNES_SHOT_DIR="$ROOT/tmp" \
+  "$ROOT/node_modules/.bin/electron" "$ROOT" --no-sandbox "$ROM" > "$ROOT/tmp/ui-tour.log" 2>&1 || true
+echo "--- 結果 ---"
+cat "$ROOT/tmp/ui-tour.json" 2>/dev/null || echo "(結果ファイルがありません)"

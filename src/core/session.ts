@@ -215,7 +215,14 @@ export class Session {
   seek(target: number): boolean {
     if (!this.rec) return false;
     const goal = Math.max(0, Math.min(target, this.rec.frameCount));
-    const k = this.rec.nearestState(goal);
+    // **1 つ手前の地点から入り直す。**
+    //
+    // 状態を復元しただけでは絵が描かれない。コアが描くのは 1 フレーム実行したとき
+    // だけで、復元は画面に触らないからだ。目的のフレームちょうどのキーフレームへ
+    // 飛ぶと 1 フレームも走らず、前に映っていた絵が残る。記録を読み込んだ直後が
+    // 真っ黒になり、巻き戻し中は 1 フレーム古い絵が出る。
+    // 1 つ手前から入れば必ず 1 フレームは走るので、必ず今の絵になる。
+    const k = this.rec.nearestState(Math.max(0, goal - 1));
     if (!k) {
       // 同期では電源投入に戻せない。呼び出し側へ再計算を頼む。
       this.pendingRecovery = goal;
@@ -225,7 +232,13 @@ export class Session {
     this.emu.frameCount = k.frame;
     this.lastRestoredFrame = k.frame;
     this.aheadFresh = false;
+    clearJam();
     this.replayTo(goal);
+    // 復元したキーフレームが壊れていれば、ここで CPU が止まる。
+    if (consumeJam()) {
+      this.pendingRecovery = goal;
+      return false;
+    }
     this.snapshotHere();
     return true;
   }

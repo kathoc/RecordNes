@@ -11,20 +11,17 @@ test("復元できないキーフレームを掴んでも、記録から作り�
   const script = scriptedInput(11);
   for (let f = 0; f < 200; f++) s.step(script(f));
 
-  // 壊れている地点へ戻る。
-  assert.ok(s.seek(30), "キーフレームからの復元自体は成功する");
-  assert.equal(s.frame, 30);
-
-  // 次の 1 フレームで CPU が止まり、立て直しが要求される。
-  s.step(script(30));
-  assert.equal(s.pendingRecovery, 30, "止まったことを検知して立て直しを要求する");
+  // フレーム 31 を狙うと、1 つ手前 (壊れているフレーム 30 のキーフレーム) から
+  // 入り直すことになり、そこで CPU が止まる。
+  assert.equal(s.seek(31), false, "壊れたキーフレームを掴んだことを検知する");
+  assert.equal(s.pendingRecovery, 31, "立て直しを要求する");
 
   await s.recover();
-  assert.equal(s.frame, 30, "同じ位置へ戻ってくる");
+  assert.equal(s.frame, 31, "同じ位置へ戻ってくる");
   assert.equal(s.pendingRecovery, null);
 
   // 以後は普通に進む。同じ入力を流せば、一本で通したのと同じ画面になる。
-  for (let f = 30; f < 200; f++) s.step(script(f));
+  for (let f = 31; f < 200; f++) s.step(script(f));
   assert.equal(s.pendingRecovery, null, "二度と止まらない");
   const straight = await newSession(SMB, 0);
   for (let f = 0; f < 200; f++) straight.step(script(f));
@@ -36,11 +33,9 @@ test("捨てたキーフレームは二度と使われない", async (t) => {
   const s = await newSession(SMB, 0);
   const script = scriptedInput(12);
   for (let f = 0; f < 200; f++) s.step(script(f));
-  s.seek(30);
-  s.step(script(30));
+  s.seek(31);
   await s.recover();
   // もう一度同じ場所を狙っても、壊れたキーフレームは残っていない。
-  s.seek(30);
-  s.step(script(30));
+  assert.ok(s.seek(31), "今度は復元に成功する");
   assert.equal(s.pendingRecovery, null, "もう止まらない");
 });

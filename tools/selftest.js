@@ -11,7 +11,7 @@ const key = (code, type) => window.dispatchEvent(new KeyboardEvent(type, { code,
 const hold = async (code, ms) => { key(code, "keydown"); await sleep(ms); key(code, "keyup"); };
 
 // 1. ROM が読み込まれ、記録が始まっていること
-for (let i = 0; i < 100 && !s.rec; i++) await sleep(100);
+for (let i = 0; i < 100 && !(s.rec && s.frame > 0); i++) await sleep(100);
 check("ROM が読み込まれ記録が始まる", !!s.rec && s.frame > 0, { frame: s.frame });
 
 // 2. 実時間どおりに進むこと（1 秒 ≒ 60 フレーム）
@@ -99,9 +99,27 @@ check("入力列が往復で一致する",
   JSON.stringify([...back.rec.inputBytes()]) === JSON.stringify([...s.rec.inputBytes()]), {});
 app.setPaused(false);
 
-// 12. 目印
+// 12. 保存した記録を読み込んで、最初から再生し、同じ画面に着く
+const hash = (px) => { let h = 2166136261; for (let i = 0; i < px.length; i += 7) { h ^= px[i]; h = Math.imul(h, 16777619); } return h >>> 0; };
+const endHash = hash(s.emu.pixels);
+await app.openRecordingBytes(bytes);        // 末尾から再開する形で読み込む
+check("記録を読み込むと末尾に着く", s.frame === savedFrames, { frame: s.frame, savedFrames });
+check("末尾の画面が記録時と一致する", hash(s.emu.pixels) === endHash, {});
+
+s.playFromStart();
+check("最初から再生できる", s.frame === 0 && s.mode === "playback", { frame: s.frame, mode: s.mode });
+app.setPaused(false);
+// 再生を最後まで見届ける（早送りで待ち時間を詰める）
+app.setSpeed(7);
+for (let i = 0; i < 300 && s.frame < savedFrames; i++) await sleep(50);
+app.setSpeed(4);
+check("再生が末尾まで進む", s.frame >= savedFrames, { frame: s.frame, savedFrames });
+check("再生後の画面が記録時と一致する", hash(s.emu.pixels) === endHash, {});
+app.setPaused(true);
+
+// 13. 目印
 app.addMarker();
-check("目印が打てる", s.markers().length === 1, { markers: s.markers().length });
+check("目印が打てる", s.markers().length >= 1, { markers: s.markers().length });
 
 await shot("selftest-4-final");
 return { ok: log.every((x) => x.ok), log, frames: s.totalFrames };

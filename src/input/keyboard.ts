@@ -60,7 +60,17 @@ export class Keyboard {
   private wantReset = false;
 
   attach(target: EventTarget = window): () => void {
+    // 文字を打っている最中はゲームへ流さない。設定の入力欄で Backspace を
+    // 押したら巻き戻しが始まる、という事故を防ぐ。
+    const typing = (ev: Event): boolean => {
+      const t = ev.target as HTMLElement | null;
+      if (!t) return false;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable;
+    };
+
     const onDown = (ev: Event): void => {
+      if (typing(ev)) return;
       const e = ev as KeyboardEvent;
       if (e.repeat) {
         // コマ送りだけは押しっぱなしで連続させたい。
@@ -82,6 +92,7 @@ export class Keyboard {
       if (cmd) this.pending.push(cmd);
     };
     const onUp = (ev: Event): void => {
+      if (typing(ev)) return;
       const e = ev as KeyboardEvent;
       this.down.delete(e.code);
       if (this.known(e.code)) e.preventDefault();
