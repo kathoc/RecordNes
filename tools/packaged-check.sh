@@ -33,11 +33,5 @@ pkill -f "$UDD" 2>/dev/null || true
 
 [ -f "$OUT" ] || { echo "NG  結果が出ませんでした（終了コード $CODE）"; tail -5 "$ROOT/tmp/packaged-check.log"; exit 1; }
 
-python3 - "$OUT" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(("PASS" if d.get("ok") else "FAIL"))
-for x in d.get("log", []):
-    print(("  OK  " if x["ok"] else "  NG  ") + x["name"], json.dumps(x.get("detail"), ensure_ascii=False))
-sys.exit(0 if d.get("ok") else 1)
-PY
+source "$ROOT/tools/lib-run.sh"
+report_result "$OUT" --items
